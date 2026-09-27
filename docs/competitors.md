@@ -75,10 +75,11 @@ a VPS; not measured here.
 Plaid US and EU, SimpleFIN, Enable Banking, Mercury, Wise, several brokers
 and crypto exchanges, and more. Plaid uses your own client id and secret,
 pulls `/transactions/sync` with `include_original_description`, plus
-liabilities and investments. Plaid items sync on Plaid's webhooks and when
-someone opens the app — not on a schedule — and `docs/hosting/plaid.md`
-says the instance must be reachable from the internet over HTTPS for those
-webhooks.
+liabilities and investments. Plaid items sync on Plaid's webhooks, when
+someone opens the app, and once a night: a sidekiq-cron job
+(`sync_all_accounts`, on by default, time set in Settings) syncs every
+linked account. `docs/hosting/plaid.md` says the instance must be reachable
+from the internet over HTTPS for the webhooks.
 
 **What it keeps from Plaid** (`plaid_entry/processor.rb`):
 
