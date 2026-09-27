@@ -1,0 +1,33 @@
+[project]
+name = "penny"
+version = "0.1.0"
+description = "Budget tracker on Plaid and Apple Card data, and whether each paid membership (Prime, Walmart+, Costco) and its card is worth it"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/tydude001/penny"
+Issues = "https://github.com/tydude001/penny/issues"
+
+[project.scripts]
+penny = "penny.__main__:main"
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff==0.16.9"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["penny"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+# .claude/ holds agent worktrees: whole checkouts of this repo, linted where they live.
+extend-exclude = [".claude"]

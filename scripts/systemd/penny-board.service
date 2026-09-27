@@ -1,0 +1,22 @@
+# Example user systemd unit for the board (`penny board`, http://127.0.0.1:8766/).
+#
+# Install: copy it, set WorkingDirectory to your checkout, then
+#   cp scripts/systemd/penny-board.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now penny-board
+#
+# Binds 127.0.0.1, the supported setup: the board has no login, edits
+# rules.toml / assumptions.toml when an answer is saved, and shows every
+# transaction. It never commits. To list open to-dos from a Markdown table,
+# add `--todo-file PATH` to ExecStart. The instance is ./home in the working
+# directory unless PENNY_HOME (Environment=) or --home says otherwise.
+[Unit]
+Description=penny board
+
+[Service]
+WorkingDirectory=%h/penny
+ExecStart=%h/.local/bin/uv run --frozen penny board
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,57 @@
+# A test instance: a made-up person's rules.toml ([held], [accounts] and
+# overrides), read over penny/defaults/rules.toml. Every account number,
+# pattern and value here is invented.
+
+[held]
+# The card every "edge" is measured against — what you'd use if the store card
+# didn't exist. A flat 2% card makes the Prime Visa's 5% a 3-point edge, not 5.
+baseline_card = "sapphire_preferred"
+# What you hold today. Informational for now; the report shows every option.
+cards = ["sapphire_preferred", "prime_visa", "walmart_card", "freedom_flex"]
+memberships = ["prime", "walmart_plus", "costco"]
+costco_tier = "executive"
+
+[accounts]
+# Linked accounts by last four digits: the board shows each under its card's
+# label. feed_lacks_rewards: the feed drops the card's reward-redemption
+# credits, so the check infers them, up to the card's best rate × net
+# purchases since the last known redemption.
+"2001" = { card = "walmart_card", feed_lacks_rewards = true }
+"2002" = { card = "sapphire_preferred" }
+"2003" = { card = "freedom_flex" }
+"2004" = { card = "prime_visa" }
+
+[families.walmart_delivery]
+# The Walmart card: the weekly grocery order posts there as bare "Walmart".
+accounts = ["2001"]
+
+# Replaces the defaults' [[categories.rules]] whole (an array is not merged).
+[[categories.rules]]
+category = "housing"
+patterns = ['maple court apts']   # rent, which Plaid files as TRAVEL_LODGING
+
+[[categories.rules]]
+category = "subscriptions"
+patterns = ['apple\.com/bill', 'streamco']
+
+[[categories.rules]]
+category = "earned"   # card statement credits; Plaid files them under OTHER
+patterns = ['\btravel credit', '\bhotel credit', '\bthe edit\b']
+
+[cards.sapphire_preferred]
+# Points valued at 1.5¢, redeemed as earned. The board's ¢/pt Record rescales
+# default_rate and every rate below together.
+default_rate = 0.015
+rates = { restaurants = 0.045, gas = 0.045, costco_gas = 0.045 }
+# The card's account numbers in the export, an old and a reissued one: the
+# card-worth block values the spend these carry, and credit detection reads
+# only these.
+accounts = ["2008", "2002"]
+
+[cards.freedom_flex]
+accounts = ["2003"]
+
+[card_credits.sapphire_preferred]
+# The statement cycle closes on the 15th and the fee bills on the first
+# statement of the card year, so a year starts the 16th of April.
+year_starts = "04-16"

@@ -1,0 +1,32 @@
+# Lint and test on ubuntu-24.04. Statement parsing shells out to pdftotext
+# (poppler-utils), but the suite mocks it rather than calling the real
+# binary (tests/test_statements.py fixtures are pdftotext -layout output,
+# and tests/test_check_nulls.py exercises the missing-pdftotext path via
+# monkeypatch) — so CI doesn't need poppler-utils installed to pass.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv sync --locked
+      - run: uv run ruff check .
+
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.0.1
+      - run: uv sync --locked
+      - run: uv run pytest

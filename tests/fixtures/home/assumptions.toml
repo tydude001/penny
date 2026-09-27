@@ -1,0 +1,133 @@
+# A test instance's perk values, invented: what the transaction data cannot
+# say. Annual dollars, low / base / high.
+#
+# Honest way to fill these: value = what you would otherwise have paid, not
+# the list price of the perk.
+
+[prime.shipping]
+note = "Orders that would have paid shipping or been bundled to hit a free-ship minimum"
+low = 0
+base = 20
+high = 60
+
+[prime.video]
+note = "Recorded 2026-08-02: $0 a year"
+low = 0
+base = 0
+high = 0
+
+[prime.pharmacy]
+note = "Prime Rx pricing vs a local pharmacy on what you actually fill."
+low = 0
+base = 5
+high = 25
+
+[prime.rxpass]
+ask = "What would your prescription cost without RxPass?"
+how = "Price it for a year at another pharmacy or on GoodRx, then take off $60 for the RxPass subscription. What is left is the answer; it can be negative."
+note = "RxPass needs Prime: $5/mo for one subscription. Value = what the script costs elsewhere minus $60. PLACEHOLDER: price it and replace."
+low = 0
+base = 90
+high = 300
+
+[prime.one_medical]
+ask = "Are you keeping One Medical?"
+how = "With Prime it costs $108 a year against $199 without, so keeping it is worth $91 a year of Prime. Cancelling makes it worth nothing."
+low_if = "No, I'll cancel it"
+high_if = "Yes, keeping it"
+note = "Recorded 2026-08-02: not a member, $0 a year"
+low = 0
+base = 0
+high = 0
+
+[walmart_plus.delivery]
+ask = "Without Walmart+, would you pay for grocery delivery?"
+how = "A weekly order is 52 deliveries a year. Paid delivery elsewhere runs about $8-10 an order; free pickup costs nothing but time."
+low_if = "No, I'd use free pickup"
+high_if = "Yes, I'd pay about $9 an order"
+note = "Recorded 2026-08-02: $60 a year, a few paid deliveries plus gas for pickup trips"
+low = 60
+base = 60
+high = 60
+
+[walmart_plus.fuel]
+note = "Per-gallon discount × gallons actually bought at participating stations"
+low = 0
+base = 0
+high = 0
+
+[walmart_plus.streaming]
+note = "Recorded 2026-08-02: $0 a year"
+low = 0
+base = 0
+high = 0
+
+[costco.prices]
+ask = "Is Costco cheaper on what you buy there?"
+how = "Compare receipts on the few items you buy at both stores. It only counts if you actually move them. Negative if Costco makes you buy more than you use."
+low_if = "No real saving"
+note = "Costco vs your usual store on the basket you actually buy there; measured ~$50/yr, not yet taken as the answer."
+measured = 50
+measured_if = "Move coffee and paper goods to Costco"
+low = 0
+base = 0
+high = 0
+
+[costco.gas]
+ask = "Is Costco gas cheaper than your usual station?"
+how = "Cents a gallon cheaper times gallons a year at Costco. The card side of Costco gas is counted already; this is the pump price only."
+low_if = "No real saving"
+note = "Costco pump price vs nearest alternative × gallons"
+low = 0
+base = 0
+high = 0
+
+# ---------------------------------------------------------------------------
+# The baseline card's value per point, as a range: $ per point. Base is the
+# card's own default_rate in rules.toml.
+[point_value.sapphire_preferred]
+low = 0.01
+high = 0.02
+
+# ---------------------------------------------------------------------------
+# Card worth: is the Sapphire Preferred worth its fee against a no-fee 2%
+# card, on the spend it actually carries? Benefits: annual $ at what you would
+# otherwise pay, not face value.
+[card_worth]
+alternatives = ["sapphire_preferred", "baseline"]
+
+[card_worth.benefits.sapphire_preferred.hotel_credit]
+note = "$100/yr Chase Travel hotel credit; used some years, not others."
+verified = true
+low = 0
+base = 40
+high = 100
+
+[card_worth.benefits.sapphire_preferred.doordash]
+note = "DashPass: wouldn't pay for it, but orders now and then. Per-order saving is an estimate."
+verified = true
+low = 10
+base = 60
+high = 120
+
+# ---------------------------------------------------------------------------
+# Budget: dollars a month per budget category (rules.toml [categories]). 0 = no
+# budget set. Keys are the category with spaces as underscores.
+[budget]
+dining = 300
+entertainment = 50
+fees_and_interest = 0
+giving = 25
+groceries = 500
+health = 60
+housing = 1500
+insurance = 120
+payments_off_the_feed = 100
+personal_care = 40
+services = 30
+shopping = 250
+subscriptions = 60
+taxes_and_government = 50
+transport = 300
+travel = 150
+utilities = 180

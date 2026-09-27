@@ -1,0 +1,16 @@
+# The instance (rules.toml, assumptions.toml, data/): one person's accounts
+# and history. Never committed; `penny init` makes one.
+/home/
+# The pre-instance location of data/, until it moves into home/. Holds tokens.
+/data/
+# The pre-instance config, superseded by home/rules.toml and home/assumptions.toml.
+/rules.toml
+/assumptions.toml
+.home-*.draft
+*.csv
+!tests/fixtures/*.csv
+.venv/
+__pycache__/
+.pytest_cache/
+*.egg-info/
+.gitmessage

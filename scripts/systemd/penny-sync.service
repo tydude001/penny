@@ -1,0 +1,34 @@
+# Example user systemd unit: one Plaid sync of every production Item (`penny plaid sync`),
+# run daily by penny-sync.timer. Each run appends balances and Chase's
+# Liabilities to data/plaid/production/balances.jsonl and writes
+# last-sync.json (all under the instance, ./home unless
+# PENNY_HOME says otherwise), which the board reads to show a failed or overdue sync.
+#
+# Install: copy both, set WorkingDirectory to your checkout, then
+#   cp scripts/systemd/penny-sync.{service,timer} ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now penny-sync.timer
+#
+# A user unit can't order itself after network-online.target (that target
+# lives in the system manager), so ExecStartPre waits up to 5 min for DNS to
+# resolve Plaid's host instead; it makes no Plaid call.
+#
+# Exit status of `penny plaid sync`: 1 when a failure may clear by itself
+# (network, Plaid or bank outage, rate limit), so systemd tries again 15 min
+# later, up to 4 starts in 2 h; 2 when the only failures need you (e.g.
+# ITEM_LOGIN_REQUIRED: `penny plaid link --env production --relogin ITEM`),
+# which no retry fixes, so RestartPreventExitStatus stops it. Either way the
+# failure is in last-sync.json and on the board.
+[Unit]
+Description=penny daily Plaid sync
+StartLimitIntervalSec=2h
+StartLimitBurst=4
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/penny
+ExecStartPre=/bin/sh -c 'i=0; until getent hosts production.plaid.com >/dev/null 2>&1; do i=$$((i+1)); if [ $$i -ge 60 ]; then echo "no network after 5 min" >&2; exit 1; fi; sleep 5; done'
+ExecStart=%h/.local/bin/uv run --frozen penny plaid sync --env production
+TimeoutStartSec=900
+Restart=on-failure
+RestartSec=15min
+RestartPreventExitStatus=2
