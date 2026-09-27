@@ -22,7 +22,16 @@ membership and its card worth the fee, this year, on how you actually spend?
 The budget tracker (spending by category, cash flow, net worth) comes along
 for free on the same data, but the membership math is the point.
 
-<!-- screenshots from penny demo -->
+![The Memberships page: each membership and its store card, netted against the fee, with a low–high range](docs/screenshots/memberships.png)
+
+<details>
+<summary>The budget board's overview</summary>
+
+![The Overview page: left to spend this month, accounts, upcoming charges and spending by category](docs/screenshots/overview.png)
+
+</details>
+
+<sub>Screenshots are `penny demo`: a synthetic year of data, no real accounts.</sub>
 
 ## Quick start
 
