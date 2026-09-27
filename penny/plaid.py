@@ -79,6 +79,8 @@ def failure_text(e: BaseException, item_id: str, env: str) -> str:
     msg = str(e) if isinstance(e, (PlaidError, OSError)) else f"{type(e).__name__}: {e}"
     if isinstance(e, PlaidError) and e.needs_relogin:
         msg += f" — sign in again: penny plaid link --env {env} --relogin {item_id}"
+        if env == "production":
+            msg += " --redirect-uri https://YOUR-HOST/"  # production Link refuses to start without one
     return msg
 
 

@@ -310,3 +310,8 @@ def test_a_failed_poll_leaves_the_old_cursor(tmp_path):
     with pytest.raises(plaid.PlaidError):
         plaid.wait_ready(c, store, "i", sleep=lambda s: None)
     assert store.items()["i"]["cursor"] is None and not (store.dir / "i.json").exists()
+
+
+def test_a_production_login_failure_names_the_redirect_uri():
+    msg = plaid.failure_text(plaid.PlaidError({"error_code": "ITEM_LOGIN_REQUIRED"}, 400), "item1", "production")
+    assert "--env production --relogin item1 --redirect-uri " in msg

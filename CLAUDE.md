@@ -57,8 +57,8 @@ read by anything here, and nothing in this file assumes one exists.
 uv sync
 uv run ruff check .
 uv run pytest
-uv run penny demo                          # synthetic year of data, opens the board
-uv run penny report data/<export>.csv      # the verdict table
+uv run penny demo                          # synthetic year of data, board on 127.0.0.1:8766
+uv run penny report export.csv             # the verdict table
 uv run penny board                         # decision board, loopback by default
 ```
 
