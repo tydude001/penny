@@ -1,0 +1,41 @@
+name: Bug
+description: penny ran, and did the wrong thing.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Never paste transactions, balances, or account numbers here** —
+        issues are public and edit history stays visible even if you delete
+        a comment later. Describe the shape of the problem instead (a wrong
+        sign, a category that never matches, a rate that's off, an amount
+        that's rounded wrong).
+  - type: textarea
+    id: ran
+    attributes:
+      label: What you ran
+      description: The CLI command, or what you did on the board.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened, and what you expected
+      description: |
+        Describe the shape of any data involved (a category, a card, a
+        family) rather than pasting the row itself.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Output of `uv run penny --version`
+      placeholder: penny 0.1.0
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Optional — Python version, OS, or a stack trace with any data stripped out.

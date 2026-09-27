@@ -1,0 +1,11 @@
+# Daily trigger for penny-sync.service; Persistent catches a run missed while the box was off.
+[Unit]
+Description=penny daily Plaid sync
+
+[Timer]
+OnCalendar=*-*-* 06:30
+RandomizedDelaySec=20m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

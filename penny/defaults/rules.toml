@@ -1,0 +1,480 @@
+# penny's defaults: merchant families, budget categories, and the card and
+# membership catalogue (earn rates, fees, credits). Shipped with penny.
+# Your instance's rules.toml (penny init) holds what you hold ([held]), your
+# account numbers ([accounts]) and any override; it is merged over this file
+# on load, table by table, and a key there wins over the same key here.
+# Every rate and fee marked verified = false is a recollection, not checked —
+# confirm against the card's terms and the membership page, then flip the flag.
+# The report lists every unverified entry at the bottom until you do.
+
+[export]
+# Which sign the Rocket Money export uses for money leaving an account.
+# `penny inspect data/x.csv` guesses from income rows; set this to match.
+expense_sign = "positive"
+# Rocket Money categories that are not spend. Dropped at load so a paycheck
+# cannot net "other" negative. Check `penny inspect` for the exact names.
+exclude_categories = ["Income", "Internal Transfers", "Savings Transfer", "Credit Card Payment", "Investment"]
+
+# ---------------------------------------------------------------------------
+# Families — tried in this order, first match wins. Specific before general.
+# `patterns` are case-insensitive regexes against custom name | name | description.
+# A pattern beats the mcc/category fallback, so anchor it: '\bname' keeps a
+# store number glued on ("CHEVRON0301") matching, and '(?![a-z])' after a short
+# or common word keeps it out of longer ones ('heb' in "cheba hut", 'pilot' in
+# Copilot, "love's" in gloves).
+# `categories` are the fallback when no pattern hits: Plaid's detailed
+# personal_finance_category names (the feed), beside Rocket Money's (the export,
+# until it is retired in M3). `mccs`, merchant category codes, decide instead
+# wherever the row has one: issuers pay by the code, and Plaid's categories
+# disagree with it both ways (bars under BEER_WINE_AND_LIQUOR, a 5814 vending
+# machine, games under liquor).
+# Tune with `penny unmatched` and `penny families`.
+
+[families.rxpass]
+# RxPass: $5 on the ~2nd of each month, posts as a bare "AMAZON" under
+# Health & Wellness. Needs Prime. Its value is what both people's scripts
+# would cost elsewhere minus $120/yr (the wife's $5/mo bills her card and is
+# not in this export) — see assumptions.toml.
+label = "RxPass"
+membership = "prime"
+patterns = ['amazon \| amazon$']
+amounts = [5.00]
+
+[families.one_medical]
+# $9/mo Prime-member price for One Medical (list is $199/yr). A Prime perk,
+# not Amazon shopping, so it must not earn the Prime Visa's 5%.
+label = "One Medical"
+membership = "prime"
+patterns = ['amazon onemed', '\bone ?medical']
+
+[families.amazon_pharmacy]
+label = "Amazon Pharmacy"
+membership = "prime"
+patterns = ['amazon.*pharm', 'amzn.*pharm', '\bpillpack']
+
+[families.whole_foods]
+label = "Whole Foods"
+membership = "prime"
+patterns = ['\bwhole ?foods', '\bwholefds', '\bwfm ']
+
+[families.amazon]
+label = "Amazon"
+membership = "prime"
+patterns = ['amazon', 'amzn']   # loose on purpose: Rocket Money custom names ("medication") prefix the text
+
+[families.walmart_delivery]
+# The weekly grocery order on the OnePay card posts as bare "Walmart", which
+# reads as in-store. It is a walmart.com delivery order, so it takes the
+# online rate. Restricted to that card's account number.
+# UNDERCOUNTED: Rocket Money's OnePay feed drops purchase rows while keeping
+# payments. Walmart's order history, 2026-05-03 -> 09-19, is $1,437 over 140
+# days (~$3,750/yr) where the export has $520 for the same months. Treat this
+# family's spend in the report as a floor; `penny walmart` on an order
+# capture is the real figure. docs/costco-vs-walmart.md, 2026-09-20.
+label = "Walmart delivery (OnePay)"
+membership = "walmart_plus"
+patterns = ['\bwalmart']
+# Matches only on the account numbers your instance names here; empty
+# matches nothing, so a plain Walmart row falls through to walmart_store.
+accounts = []
+
+[families.walmart_online]
+label = "Walmart.com"
+membership = "walmart_plus"
+patterns = ['\bwalmart\.com', '\bwal-mart\.com', '\bwm\.com', '\bwalmart\+']
+# Plaid names a walmart.com order on a Chase card plain "Walmart", as it does a
+# store trip; its payment_channel = "online" is what tells them apart.
+online_patterns = ['\bwalmart']
+
+[families.walmart_store]
+label = "Walmart store"
+membership = "walmart_plus"
+patterns = ['\bwal-?mart', '\bwm supercenter']
+
+[families.costco_gas]
+label = "Costco gas"
+# Costco's pumps and warehouse take Visa only for credit (customerservice.costco.com
+# a_id/719, checked 2026-09-22); costco.com also takes Mastercard. `networks`
+# is read by the board only: a card on another network is never picked here.
+networks = ["visa"]
+membership = "costco"
+patterns = ['\bcostco.*\b(gas|fuel)', '\bcostco whse.*\bgas']
+
+[families.costco]
+label = "Costco"
+networks = ["visa"]
+membership = "costco"
+patterns = ['\bcostco']
+
+[families.gas]
+label = "Gas (other)"
+patterns = ['\bshell\b', '\bexxon', '\bmobil\b', '\bchevron', '\bbp\b', '\bmurphy(?![a-z])', '\bkwik', "\\bcasey'?s(?![a-z])", '\bspeedway', '\bquiktrip', '\bqt\b', '\bcircle k(?![a-z])', '\bmarathon(?![a-z])', '\bsunoco', '\bphillips 66', '\bconoco', '\bvalero', '\bsheetz', '\bwawa(?![a-z])', '\bracetrac', '\bbuc-?ee', "\\blove'?s(?![a-z])", '\bpilot(?![a-z])', '\bflying j(?![a-z])']
+categories = ["Gas", "Gas & Fuel", "TRANSPORTATION_GAS"]
+mccs = ["5541", "5542"]
+
+[families.restaurants]
+label = "Restaurants"
+patterns = []
+categories = ["Dining & Drinks", "Restaurants", "Food & Drink", "Fast Food", "Coffee Shops",
+              "FOOD_AND_DRINK_RESTAURANT", "FOOD_AND_DRINK_FAST_FOOD", "FOOD_AND_DRINK_COFFEE",
+              "FOOD_AND_DRINK_OTHER_FOOD_AND_DRINK"]
+mccs = ["5812", "5813", "5814"]  # restaurants, bars, fast food
+
+[families.drugstores]
+label = "Drugstores"
+patterns = ['\bcvs(?![a-z])', '\bwalgreens', '\brite aid']
+categories = ["Pharmacy", "MEDICAL_PHARMACIES_AND_SUPPLEMENTS"]
+mccs = ["5912"]
+
+[families.apple]
+# Billed by Apple: Apple Store, App Store / iCloud / services (apple.com/bill),
+# iPhone installments, AppleCare. The Apple Card pays 3% here. Named, not
+# '\bapple\b': a photo booth vendor and Apple Cash transfers carry the word too.
+label = "Apple"
+# The Apple Card CSV names an online order "Apple Online Store" and an iPhone's
+# monthly charge "Monthly Installments (n Of 24)"; installments are Apple-only.
+patterns = ['\bapple store', '\bapple online store', '\bapple\.com', '\bapplecare', '\bitunes', '\bmonthly installments']
+categories = []
+
+[families.groceries]
+label = "Groceries (other)"
+patterns = ['\bkroger', '\baldi(?![a-z])', '\bheb(?![a-z])', '\bh-e-b', '\bpublix', '\bsafeway', '\bmeijer', '\btrader joe', '\bhy-?vee', '\bwegmans']
+categories = ["Groceries", "FOOD_AND_DRINK_GROCERIES"]
+mccs = ["5411"]
+
+# ---------------------------------------------------------------------------
+# Budget categories: what the money was for, beside the family (what a card
+# earns on). First answer wins: a transfer, card payment or income is not
+# spend; a reward is "earned"; then [[categories.rules]] patterns; then the
+# family's default; then Plaid's category, detailed before primary; else
+# "uncategorised". `penny categories` lists the biggest uncategorised merchants.
+
+[[categories.rules]]
+category = "subscriptions"
+patterns = ['apple\.com/bill', 'anthropic']
+
+[[categories.rules]]
+category = "earned"   # card statement credits; Plaid files them under OTHER
+patterns = ['\btravel credit', '\bhotel credit', '\bthe edit\b']
+
+[categories.families]
+rxpass = "health"
+one_medical = "health"
+amazon_pharmacy = "health"
+drugstores = "health"
+whole_foods = "groceries"
+walmart_delivery = "groceries"
+walmart_store = "groceries"
+costco = "groceries"
+groceries = "groceries"
+amazon = "shopping"
+walmart_online = "shopping"
+apple = "shopping"
+costco_gas = "transport"
+gas = "transport"
+restaurants = "dining"
+membership_fees = "subscriptions"
+
+[categories.plaid]
+FOOD_AND_DRINK = "dining"
+FOOD_AND_DRINK_GROCERIES = "groceries"
+GENERAL_MERCHANDISE = "shopping"
+GENERAL_SERVICES = "services"
+GENERAL_SERVICES_INSURANCE = "insurance"
+GENERAL_SERVICES_AUTOMOTIVE = "transport"
+TRANSPORTATION = "transport"
+RENT_AND_UTILITIES = "utilities"
+RENT_AND_UTILITIES_RENT = "housing"
+HOME_IMPROVEMENT = "housing"
+TRAVEL = "travel"
+ENTERTAINMENT = "entertainment"
+MEDICAL = "health"
+PERSONAL_CARE = "personal care"
+GOVERNMENT_AND_NON_PROFIT = "taxes and government"
+GOVERNMENT_AND_NON_PROFIT_DONATIONS = "giving"
+BANK_FEES = "fees and interest"
+
+[cashflow]
+# Cash flow (penny/cashflow.py). A payment out of a bank account to one of
+# these payees pays a card whose purchases the feed already has, so it is a
+# transfer. Every other payment out (a loan, PayPal pay-in-4) is money out,
+# under "payments off the feed". Regexes. Wells Fargo and Citi linked
+# 2026-09-27; no Citi payment out of SoFi yet to take its wording from.
+feed_card_payees = ["CHASE CREDIT CRD", "APPLECARD GSBANK", "ONEPAY CASHREWRD", "WELLS FARGO CARD"]
+
+# ---------------------------------------------------------------------------
+# Cards. `rates` by family key; anything not listed earns `default_rate`.
+
+[cards.baseline]
+label = "Flat 2%"
+# `network` on a card: which store `networks` it passes. Checked 2026-09-22:
+# OnePay CashRewards, Apple Card and Citi Custom Cash are Mastercard; the
+# Autograph is a Visa Signature; the rest carry Visa in their names.
+verified = true
+default_rate = 0.02
+annual_fee = 0   # a hypothetical no-fee 2% card, the Preferred's cash alternative
+
+[cards.sapphire_preferred]
+# Product-changed from the Reserve (a new account number in the export)
+# by phone on 2026-09-14, before the $795 renewal billed on 2026-10-01. $95
+# annual fee, confirmed on the call; read only by the card-worth
+# block, never by a membership net. Earn from creditcards.chase.com/rewards-credit-cards/sapphire/
+# preferred, read 2026-09-13: 3x dining, gas, streaming and online grocery;
+# 2x other travel; 5x Chase Travel; 5x Lyft through 2027-09-30; 1x all other.
+# Online grocery excludes Walmart, so walmart_delivery stays at 1x. costco_gas
+# at 3x assumes Costco pumps code as a gas station: believed, not checked.
+# No family here separates streaming or travel.
+# The ¢/pt is a judgment, not a card term, which is why verified stays false.
+# The board's ¢/pt Record rescales default_rate and every rate below together,
+# keeping each one's multiple of the default.
+label = "Sapphire Preferred"
+network = "visa"
+verified = false
+# The default is 1¢, the cash-out value; set your own ¢/pt in your instance.
+default_rate = 0.01
+rates = { restaurants = 0.03, gas = 0.03, costco_gas = 0.03 }
+annual_fee = 95
+
+[cards.prime_visa]
+label = "Prime Visa"
+network = "visa"
+verified = true
+requires_membership = false   # becomes the plain Amazon Visa without Prime
+default_rate = 0.01
+rates = { amazon = 0.05, whole_foods = 0.05, amazon_pharmacy = 0.05, gas = 0.02, restaurants = 0.02, drugstores = 0.02 }
+without_membership_rates = { amazon = 0.03, whole_foods = 0.03, amazon_pharmacy = 0.03 }
+
+[cards.walmart_card]
+# The export shows this is the OnePay Cash Rewards card.
+label = "OnePay Cash Rewards"
+network = "mastercard"
+# Verified 2026-09-13 against onepay.com/credit-card: "Walmart+ members earn
+# unlimited 5% cash back at Walmart, non-members earn 3% cash back." Same rate
+# in store and online. 1.5% everywhere else. So 2 of the 5 points are Walmart+'s.
+verified = true
+# verified_on: the date the terms were last checked, shown on the board and set
+# with verified by its verify button.
+verified_on = "2026-09-13"
+requires_membership = false
+default_rate = 0.015
+rates = { walmart_delivery = 0.05, walmart_online = 0.05, walmart_store = 0.05 }
+without_membership_rates = { walmart_delivery = 0.03, walmart_online = 0.03, walmart_store = 0.03 }
+
+[cards.costco_visa]
+label = "Costco Anywhere Visa"
+network = "visa"
+verified = false
+requires_membership = true   # the card is closed when the membership lapses
+default_rate = 0.01
+rates = { costco_gas = 0.05, gas = 0.04, restaurants = 0.03, costco = 0.02 }
+
+# The three below are held but carry no everyday spend. Rates are
+# recollections, not read from the terms. All three have no annual fee
+# (also recollection; comment only, the model has no card-fee term).
+
+[cards.apple_card]
+# Not in the export: Rocket Money's Apple Card connection is erroring. As of
+# 2026-09-14 it carries only Apple-billed things — a Claude subscription,
+# iPhone monthly installments and AppleCare — about $1,800 a year, none of it
+# in any family. Earn: 3% at Apple (App Store, services, installments,
+# AppleCare) and a short list of named merchants (Walgreens, Exxon/Mobil,
+# Uber, T-Mobile, Nike...) that no family here separates; 2% through Apple
+# Pay; 1% with the physical card or the number typed in. default_rate is the
+# Apple Pay 2%. Checked against apple.com/apple-card 2026-09-22: unchanged;
+# Chase takes over from Goldman over ~24 months — recheck when it lands.
+label = "Apple Card"
+network = "mastercard"
+verified = true
+verified_on = "2026-09-22"
+requires_membership = false
+default_rate = 0.02
+rates = { apple = 0.03 }
+# The board's where-to-swipe sheet names the default rate by how it is earned.
+default_via = "Apple Pay"
+
+[cards.wf_autograph]
+# Wells Fargo, opened 2023-05. Used through 2024,
+# one charge in 2026. Earn: 3x points at 1¢ on restaurants, gas stations,
+# travel, transit, streaming and phone plans; 1x everything else. costco_gas
+# at 3x assumes Costco pumps code as a gas station, as for the Sapphire.
+# Card terms checked 2026-09-22 (NerdWallet, Upgraded Points): unchanged, $0
+# fee. The Costco-pump coding is still an assumption, not a card term.
+label = "Wells Fargo Autograph"
+network = "visa"
+verified = true
+verified_on = "2026-09-22"
+requires_membership = false
+default_rate = 0.01
+rates = { restaurants = 0.03, gas = 0.03, costco_gas = 0.03 }
+
+[cards.citi_custom_cash]
+# Not in the export. Unused until 2026-09-14, when grocery store runs moved
+# to it (autopay in full, so no interest). Earn: 5% on whichever
+# eligible category is the cycle's top one, on the first $500 a cycle, then 1%.
+# Eligible: restaurants, gas, grocery stores, drugstores, streaming, transit,
+# select travel, home improvement, fitness, live entertainment. Superstores and
+# warehouse clubs don't count as grocery, so Walmart and Costco stay at 1%.
+# The model has no "one category, capped" term, so only groceries is listed.
+# At the 1.65¢ baseline groceries is still the pick: the Sapphire pays 4.95%
+# on restaurants and gas, so 5% there gains almost nothing (it paid 6.6% at
+# the old 2.2¢). Groceries (other) was ~$1,030 in the 2026-09
+# export's trailing year, inside the cap; ~$115 of that is a person-to-person
+# grocery split Rocket Money files as Groceries, which no card pays 5% on, so
+# the store spend is ~$915 and the real edge ~$25-30. Listing more than one family
+# would count 5% on all of them at once, which the card never pays.
+# Checked 2026-09-22 (Citi page plus NerdWallet/U.S. News): unchanged. Citi
+# closed the card to new applications 2026-05-28; existing cards keep the 5%,
+# the $500 cap and no fee. Recheck if Citi announces a forced product change.
+label = "Citi Custom Cash"
+network = "mastercard"
+verified = true
+verified_on = "2026-09-22"
+requires_membership = false
+default_rate = 0.01
+rates = { groceries = 0.05 }
+
+[cards.freedom_flex]
+# Chase; mostly gas so far. Earns Ultimate Rewards
+# points that pool into the Sapphire, so a point is worth what a Sapphire point
+# is: `points_of` names that card and `points` holds multiples, not dollar
+# rates. The loader (model.resolve_points) turns them into rates at the
+# Sapphire's default_rate, and they move with its ¢/pt Record and the low/high
+# point range. Earn, from creditcards.chase.com/cash-back-credit-cards/freedom/flex
+# read 2026-09-23: 5x rotating (below); 5x Chase Travel; 3x dining including
+# takeout; 3x drugstores; 1x all other; 2x Lyft through 2027-09-30; $0 fee.
+# No family separates Chase Travel or Lyft. World Mastercard, so Costco's
+# Visa-only pumps and warehouse never pick it. Dining ties the Sapphire's 3x,
+# so outside a bonus quarter only drugstores gain.
+label = "Chase Freedom Flex"
+network = "mastercard"
+verified = false
+requires_membership = false
+points_of = "sapphire_preferred"
+points = { default = 1, restaurants = 3, drugstores = 3 }
+
+# Rotating 5x quarters, up to `cap` of combined purchases, once activated.
+# Chase announces one quarter at a time; add each as it is announced and
+# activated. The annual edge counts only quarters not yet over, so it is a
+# floor, and it assumes a quarter of the year's spend falls in each quarter.
+# Families the store behind won't match (Walmart, Target, the Red Cross) are
+# simply not listed.
+[[cards.freedom_flex.quarters]]
+# Q3 2026: gas and EV charging, public transit, select live entertainment,
+# United Way donations (read 2026-09-23). Activated: the card has carried
+# gas since July. Only gas has a family; Costco's pumps take Visa only, so
+# costco_gas never picks this card.
+start = "2026-07-01"
+end = "2026-09-30"
+families = ["gas"]
+points = 5
+cap = 1500
+
+[[cards.freedom_flex.quarters]]
+# Q4 2026: grocery stores (not Walmart or Target), dining, American Red Cross
+# donations. media.chase.com/news/chase-freedom-2026-q4-categories; activated
+# 2026-09-23. Grocery stores beat the Citi Custom Cash's 5% only by
+# the points-over-cash margin; dining alone runs ~$1,100-1,200 a quarter.
+start = "2026-10-01"
+end = "2026-12-31"
+families = ["restaurants", "groceries"]
+points = 5
+cap = 1500
+
+# ---------------------------------------------------------------------------
+# Card fees and statement credits, per anniversary year, for `penny report`.
+# Matched by descriptor, never by category: Rocket Money files these credits
+# under Credit Card Payment and Internal Transfers, which exclude_categories
+# drops, so the scan re-reads the export with nothing excluded. A credit is
+# net of its clawbacks (The Edit's $250 came back as a $250 charge after a
+# cancelled booking). docs/sapphire-valuation.md § What the export already shows.
+
+[card_credits.sapphire_preferred]
+# A card year starts on `year_starts` (MM-DD, default 01-01): set it in your
+# instance to the day after the statement that bills your annual fee.
+fee_patterns = ['annual membership fee']
+
+[card_credits.sapphire_preferred.credits.travel]
+# Reserve only; gone with the 2026-09-14 product change. `until` keeps it out
+# of the board's projected year; the report still prints it for past years.
+until = "2026-09-14"
+label = "Travel credit"
+patterns = ['\btravel credit']
+face = 300
+
+[card_credits.sapphire_preferred.credits.edit]
+# Reserve only. $500/yr in two $250 bookings.
+until = "2026-09-14"
+label = "The Edit"
+patterns = ['\bthe edit\b']
+face = 500
+
+[card_credits.sapphire_preferred.credits.hotel]
+# Preferred: $100/yr Chase Travel hotel credit. The descriptor is a guess
+# until one posts; check `penny report` after the first Chase Travel stay.
+label = "Hotel credit"
+patterns = ['\bhotel credit']
+face = 100
+
+# ---------------------------------------------------------------------------
+# Memberships. `families` are the ones whose spend the membership enables;
+# `fee_patterns` find the actual charge in the export.
+
+[memberships.prime]
+label = "Amazon Prime"
+verified = true   # fee $139 seen in the 2026-09 export; confirmed 2026-09-13
+fee = 139
+families = ["amazon", "whole_foods", "amazon_pharmacy", "one_medical", "rxpass"]
+card = "prime_visa"
+fee_patterns = ['amazon prime', 'prime membership', 'prime video membership']
+
+[memberships.walmart_plus]
+label = "Walmart+"
+verified = true   # fee $98 seen in the 2026-09 export; confirmed 2026-09-13
+fee = 98
+families = ["walmart_delivery", "walmart_online", "walmart_store"]
+card = "walmart_card"
+fee_patterns = ['walmart\+', 'walmart plus', 'walmart.*membership']
+
+[memberships.costco]
+label = "Costco"
+verified = true   # fee $65 seen in the 2026-09 export; confirmed 2026-09-13
+families = ["costco", "costco_gas"]
+card = "costco_visa"
+# Paid through the app: posts as "WWW COSTCO COM" for exactly the fee amount
+# (2026-05-04, $65). costco.com orders post the same way, hence fee_amounts.
+# Plaid names the fee plain "Costco" (merchant "Costco"), like a warehouse trip,
+# so only fee_amounts tell them apart: an exact $65.00 trip would read as a fee.
+fee_patterns = ['costco.*(member|renew|annual)', 'www costco com', '^costco \| costco$']
+fee_amounts = [60, 65, 120, 130]
+# An in-warehouse upgrade bills the tier gap for the months left, as plain
+# "Costco" at 5300 like any trip (2026-09-23: $65 x 7/12 = $37.92). With this
+# set, n/12 of each gap between tier fees (n = 1-11) also counts as a fee. A
+# refund of any fee amount matches too, so it nets against the charge.
+upgrade_prorated = true
+
+[memberships.costco.tiers.gold_star]
+fee = 65
+
+[memberships.costco.tiers.executive]
+fee = 130
+reward_rate = 0.02
+# Gasoline earns NO 2% reward. Verified 2026-09-20 against the Executive 2%
+# Reward FAQs (customerservice.costco.com a_id/1008254) and Costco's exclusion
+# list: cigarettes/tobacco, gasoline, Costco Shop Cards, postage stamps, food
+# court, cellphones, membership fees, and alcohol in 24 states (Illinois is not
+# one, so wine and beer here do earn). Only `costco` earns; `costco_gas` does
+# not, which is why reward_families is not the membership's full family list.
+reward_families = ["costco"]
+# $1,250 a year, up from $1,000. Same FAQ.
+reward_cap = 1250
+# The $65 upgrade is downside-protected: Costco refunds the upgrade fee on
+# cancel-or-downgrade, less any reward issued or accrued, so a short year nets
+# ~$0 rather than the -$4 the model shows. The model has no term for it; the
+# board reads `refundable` and calls a wash a free option instead of a no.
+# The reward is also a paper certificate on the Renewal Statement, not cash --
+# US warehouse staffed registers only, no pump, food court, Costco.com or
+# self-checkout, no printed expiry. Counted at face value because warehouse
+# spend is ~$3K/yr and it gets used on the next run.
+# Source: costco.com/f/-/executive-rewards, read 2026-09-20.
+# Full reasoning: docs/costco-vs-walmart.md.
+refundable = true
