@@ -15,8 +15,8 @@ is in scope:
 
 - **`penny board`** binds `127.0.0.1` by default. A way to reach it from off
   the machine without `--host` or `--tailscale`, or a way to read or write
-  outside its own instance directory through the Record endpoint, is a
-  vulnerability.
+  outside its own instance directory through the Record endpoint or the
+  `/import/apple` upload, is a vulnerability.
 - **The instance boundary.** Every write goes through `penny/fsio.py`
   against a path resolved from the instance directory (`--home` /
   `PENNY_HOME` / `./home`). A way to make penny read or write outside that

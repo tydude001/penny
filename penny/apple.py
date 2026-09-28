@@ -18,6 +18,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import shutil
+import tempfile
 import time
 from collections import Counter
 from datetime import date, datetime
@@ -115,3 +116,18 @@ def import_files(paths: list[Path], apple_dir: Path) -> list[str]:
         shutil.copy2(p, dest)
         out.append(f"{p.name}: imported ({what})")
     return out
+
+
+def import_upload(data: bytes, apple_dir: Path) -> list[str]:
+    """One uploaded file, as ``import_files`` takes it. An upload has no name of
+    its own (an iOS Shortcut sends only the bytes), so it is named for its
+    content: a PDF by its magic number, anything else as a CSV, which
+    ``import_files`` then refuses unless it is a Wallet export. Sending the same
+    file twice lands on the same name and says "already imported"."""
+    ext = ".pdf" if data.startswith(b"%PDF-") else ".csv"
+    name = f"upload-{hashlib.sha256(data).hexdigest()[:12]}{ext}"
+    apple_dir.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=apple_dir.parent) as tmp:
+        p = Path(tmp) / name
+        p.write_bytes(data)
+        return import_files([p], apple_dir)

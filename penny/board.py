@@ -39,6 +39,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 from . import (
+    apple,
     budget,
     cardworth,
     cashflow,
@@ -65,6 +66,7 @@ WASH = 10.0  # a tier whose best alternative is within this of the held one is s
 # (a figure worked out elsewhere, offered as one click). The model ignores them.
 PROMPTS = ("ask", "how", "low_if", "high_if", "measured_if")
 MAX_BODY = 64_000
+MAX_UPLOAD = 20_000_000  # a year of Wallet CSV is ~100 KB; a statement PDF well under 1 MB
 
 ISO_DATE = re.compile(r"(?<!\d)(\d{4}-\d{2}-\d{2})(?!\d)")
 WIKI_ID = re.compile(r"<!--\s*id:(penny-[\w-]+)\s*-->")
@@ -4136,10 +4138,12 @@ def make_handler(cfg: Config, today=date.today, names=()):
             if not self._host_ok():
                 return self._refuse("forbidden host", 403)
             path = urlsplit(self.path).path
-            if path not in ("/record", "/override"):
+            if path not in ("/record", "/override", "/import/apple"):
                 return self._refuse("not found", 404)
             if not origin_allowed(self.headers.get("Origin"), self.headers.get("Host")):
                 return self._refuse("cross-origin request refused", 403)
+            if path == "/import/apple":
+                return self._import_apple()
             ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
             if ctype != "application/json":
                 return self._refuse("send Content-Type: application/json", 415)
@@ -4163,6 +4167,30 @@ def make_handler(cfg: Config, today=date.today, names=()):
                 _log(f"board: POST {path} failed\n{traceback.format_exc()}")
                 return self._json({"error": f"{type(e).__name__}: {e}"}, 500)
             self._json(res)
+
+        def _import_apple(self):
+            """``penny import apple`` for one file POSTed as the raw body, which is
+            what an iOS Shortcut's Get Contents of URL sends. No Content-Type
+            check: a Shortcut's File body carries whatever iOS guesses, or none.
+            A cross-site page still can't post here, because its Origin fails
+            the check above; a Shortcut sends no Origin."""
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                return self._refuse("bad Content-Length", 400)
+            if n <= 0:
+                return self._refuse("send the file as the request body", 400)
+            if n > MAX_UPLOAD:
+                return self._refuse("file too large", 413)
+            data = self.rfile.read(n)
+            try:
+                lines = apple.import_upload(data, cfg.root / "data" / "apple")
+            except Exception as e:  # noqa: BLE001 -- the server's boundary: logged, answered 500
+                _log(f"board: POST /import/apple failed\n{traceback.format_exc()}")
+                return self._json({"error": f"{type(e).__name__}: {e}"}, 500)
+            _log(f"board: /import/apple: {'; '.join(lines)}")
+            ok = all(": skipped" not in line for line in lines)
+            self._json({"result": lines}, 200 if ok else 400)
 
         def log_request(self, code="-", size="-"):
             # Every POST and every non-2xx goes to the journal; a page view that worked is noise.

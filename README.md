@@ -132,6 +132,14 @@ still works for anything else, but prints a warning: the board edits config
 files and shows every transaction, and localhost is the only setup this repo
 calls supported until a login token lands (see `SECURITY.md`).
 
+The board also takes Apple Card files by upload: `POST /import/apple` with a
+Wallet CSV export or an Apple Card statement PDF as the raw request body does
+what `penny import apple FILE` does and answers with the same lines. It's
+meant for an iOS Shortcut shown in the share sheet — **Get Contents of URL**,
+method POST, request body **File** set to the Shortcut Input, then **Quick
+Look** on the result — with the board on `--tailscale`. The Host and Origin
+checks that guard the Record endpoint apply to it too.
+
 ## Privacy
 
 Nothing leaves your machine except calls to Plaid's API, and only if you set
