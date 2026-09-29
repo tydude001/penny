@@ -19,16 +19,16 @@ work ahead of penny's board there. The open question is therefore not
 "switch?" but "should penny keep growing its own tracker, or read
 transactions from one?" — see [Sure as a transaction source](#sure-as-a-transaction-source).
 
-| | penny | Sure | KevFin | Securo |
-|---|---|---|---|---|
-| Membership / card worth-it | **yes — the point** | no | no | no |
-| Budget tracker | basic board | mature | solid | mature |
-| Bank sync | Plaid (own keys), CSV | ~20 providers incl. Plaid, SimpleFIN | Plaid, SimpleFIN | Pluggy, Enable Banking, SimpleFIN; OFX/QIF/CAMT/CSV — no Plaid |
-| Stack | Python, flat files | Rails, Postgres, Redis, Sidekiq | TypeScript, Express, SQLite | FastAPI, Postgres + pgvector, Redis, Celery |
-| Hosting | local CLI + loopback board | Docker, 5 services | Docker / Electron | Docker (7 services), Helm |
-| Auth | none; loopback only | API keys, OAuth | none; LAN by design | JWT (24 h), TOTP, passkeys, OIDC |
-| License | MIT | AGPL-3.0 | MIT | AGPL-3.0 |
-| Activity | — | ~200 commits/month | quiet since 2026-07-28 | ~110 commits/month, releases every few days |
+| | penny | Sure | KevFin | Securo | Tallyo |
+|---|---|---|---|---|---|
+| Membership / card worth-it | **yes — the point** | no | no | no | no |
+| Budget tracker | basic board | mature | solid | mature | solid |
+| Bank sync | Plaid (own keys), CSV | ~20 providers incl. Plaid, SimpleFIN | Plaid, SimpleFIN | Pluggy, Enable Banking, SimpleFIN; OFX/QIF/CAMT/CSV — no Plaid | Plaid (own keys), SimpleFIN, EVM wallets, CSV |
+| Stack | Python, flat files | Rails, Postgres, Redis, Sidekiq | TypeScript, Express, SQLite | FastAPI, Postgres + pgvector, Redis, Celery | Rust, React, SQLite |
+| Hosting | local CLI + loopback board | Docker, 5 services | Docker / Electron | Docker (7 services), Helm | one binary or container |
+| Auth | none; loopback only | API keys, OAuth | none; LAN by design | JWT (24 h), TOTP, passkeys, OIDC | master password, own OAuth server, passkeys, roles |
+| License | MIT | AGPL-3.0 | MIT | AGPL-3.0 | Apache-2.0 |
+| Activity | — | ~200 commits/month | quiet since 2026-07-28 | ~110 commits/month, releases every few days | started 2026-08-21, releases weekly |
 
 ## What penny needs from a transaction source
 
@@ -241,6 +241,80 @@ there's no Plaid, so US banks go through SimpleFIN, and MCC and payment
 channel are lost either way. Only worth it for someone already running
 Securo on SimpleFIN or EU banks.
 
+## Tallyo
+
+<https://github.com/orlandoc01/tallyo>, read at `f287f7b` (2026-09-28).
+
+A household finance tracker in the same mould as Sure, but packaged as a
+single binary: transactions, budgets, recurring charges, cash flow, net
+worth and an investment portfolio, as a web app that installs as a PWA.
+
+**Stack and hosting.** A Rust server (about 84k lines including tests) with
+the React/TypeScript SPA (about 55k) embedded; one SQLite file, optionally
+encrypted with SQLCipher. No Postgres, Redis or worker processes; Docker or a
+static Linux binary. Background sync runs in-process on per-item cron
+schedules (Plaid transactions default to 06:00 and 18:00, recurring
+detection weekly).
+
+**Bank sync.** Plaid with your own keys (several credentials allowed, one
+per household member), SimpleFIN, EVM wallets through DeBank, manual
+accounts and real estate, and CSV import. Plaid uses `/transactions/sync`
+with `include_original_description`, plus holdings, investment transactions
+and liabilities. No webhooks, only polling, so nothing has to be reachable
+from the internet. **Linking asks Plaid for 90 days of history**: the link
+token names no `days_requested`, so Plaid's default of 90 applies, and the
+sync call also passes 90 (`clients/plaid.rs`). penny asks for 730.
+
+**What it keeps from Plaid** (`transactions/sync/plaid_convert.rs`):
+
+| Plaid field | In Tallyo |
+|---|---|
+| `transaction_id` | `transactions.external_id` |
+| `authorized_datetime` / `authorized_date`, else `date` | `datetime` |
+| `datetime`, else `date` | `posted_datetime` |
+| `merchant_name` | `merchant_name` |
+| `original_description`, else `name` | `original_name` |
+| `personal_finance_category` | `plaid_category`, as `PRIMARY:DETAILED` |
+| `pending` | `pending` (pending rows are stored, not skipped) |
+| everything, including MCC and `payment_channel` | `raw_provider_json`, rewritten on each modify |
+
+Account masks are kept (`accounts.mask`). Categories are Tallyo's own; the
+Plaid detailed category is mapped to one through `plaid_category_mappings`
+(editable per category), then merchant rules, then an optional local Ollama
+model for what's left, applied only at high or medium confidence.
+
+**API.** Schema-first GraphQL at `/query` (cursor-paged `transactions`,
+filters for date range, account, category, pending, text and amount), an MCP
+server at `/mcp` behind the same scopes, and CSV import and export. The
+`Transaction` type carries id, both datetimes, amount, `merchantName`,
+`originalName`, `plaidCategory`, `pending` and the account (with `mask`),
+but **not** `raw_provider_json`, so MCC and payment channel aren't reachable
+without opening the database. The CSV export carries `external_id` and both
+names but no Plaid category. No `updatedSince` filter and no outbound
+webhook.
+
+**Rewards and memberships.** None. No annual fee, reward rate or membership
+field anywhere in the schema.
+
+**Security posture.** Built for access from outside the machine: an embedded
+OAuth 2.1 server (PKCE, ES256, rotating refresh tokens), Google sign-in,
+email OTP, passkeys, and seven roles down to spending-reports-only. The
+README still says to keep it behind a VPN or reverse proxy. Bank tokens are
+plaintext in SQLite unless SQLCipher is turned on. Committed fixtures were
+not audited.
+
+**Health.** Apache-2.0. One author; history is squashed into release
+commits, v0.1.0 on 2026-08-21 to v0.3.4 on 2026-09-28. CI with CodeQL and
+coverage-gated tests for both halves. 5 stars.
+
+**As a transaction source.** The closest fit so far for what penny needs.
+Its API gives the raw descriptor and the clean merchant separately, Plaid's
+detailed category, a pending flag, a stable id and the last four, which
+covers the list above apart from MCC and payment channel (in the database
+but not the API). Its sync is polling, so there's no internet-facing
+endpoint. Two limits: 90 days of history per linked bank, which is under
+penny's 365-day window, and a one-person project five weeks old.
+
 ## Ideas worth borrowing
 
 - **A live match count in the rule editor** (KevFin's `RuleSuggestModal`):
@@ -264,6 +338,11 @@ Securo on SimpleFIN or EU banks.
 - **Rules as field / operator / value** with regexes compiled under a safety
   policy (Securo `rule_engine.py`): a structured form of what
   `[[categories.rules]]` does with bare regexes.
+- **A categorisation ladder** (Tallyo): rules first, then Plaid's
+  category, then a local model, and only confident answers are applied; the
+  rest wait in a review queue.
+- **Narrow read-only roles** (Tallyo's `spend_tracker`, reports without raw
+  transactions): a shape for penny's board if it ever gets a login.
 - **A password-encrypted backup** (KevFin, Securo): penny's instance
   directory holds Plaid access tokens and has no export of its own.
 
@@ -271,6 +350,6 @@ Securo on SimpleFIN or EU banks.
 
 penny's security stance — loopback by default, no login yet, nothing
 listening on the network unless you ask — is stricter than KevFin's and
-simpler than Sure's, and nothing here argues for loosening it. The rate
+simpler than Sure's or Tallyo's, and nothing here argues for loosening it. The rate
 catalogue in `penny/defaults/rules.toml` has no counterpart in any of these
 projects.
