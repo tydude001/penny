@@ -21,8 +21,8 @@ money went. penny is built around one question those don't answer: is the
 membership and its card worth the fee, this year, on how you actually spend?
 The budget tracker (spending by category, cash flow, net worth) comes along
 for free on the same data, but the membership math is the point.
-[`docs/competitors.md`](docs/competitors.md) compares Sure, Securo and
-KevFin in detail.
+[`docs/competitors.md`](docs/competitors.md) compares Sure, Securo,
+KevFin and Tallyo in detail.
 
 ![The Memberships page: each membership and its store card, netted against the fee, with a low–high range](docs/screenshots/memberships.png)
 
@@ -189,7 +189,7 @@ a fresh link. See `penny plaid --help` for the rest.
   membership catalogue; your instance's `rules.toml` holds only what you
   hold and any override, merged over the defaults
 - `tests/` — synthetic fixtures only; `uv run pytest`
-- `docs/competitors.md` — how penny compares with Sure, Securo and KevFin
+- `docs/competitors.md` — how penny compares with Sure, Securo, KevFin and Tallyo
 - `docs/design/logo/final/` — the logo kit
 
 ## Contributing
