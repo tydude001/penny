@@ -19,16 +19,16 @@ work ahead of penny's board there. The open question is therefore not
 "switch?" but "should penny keep growing its own tracker, or read
 transactions from one?" — see [Sure as a transaction source](#sure-as-a-transaction-source).
 
-| | penny | Sure | KevFin | Securo | Tallyo |
-|---|---|---|---|---|---|
-| Membership / card worth-it | **yes — the point** | no | no | no | no |
-| Budget tracker | basic board | mature | solid | mature | solid |
-| Bank sync | Plaid (own keys), CSV | ~20 providers incl. Plaid, SimpleFIN | Plaid, SimpleFIN | Pluggy, Enable Banking, SimpleFIN; OFX/QIF/CAMT/CSV — no Plaid | Plaid (own keys), SimpleFIN, EVM wallets, CSV |
-| Stack | Python, flat files | Rails, Postgres, Redis, Sidekiq | TypeScript, Express, SQLite | FastAPI, Postgres + pgvector, Redis, Celery | Rust, React, SQLite |
-| Hosting | local CLI + loopback board | Docker, 5 services | Docker / Electron | Docker (7 services), Helm | one binary or container |
-| Auth | none; loopback only | API keys, OAuth | none; LAN by design | JWT (24 h), TOTP, passkeys, OIDC | master password, own OAuth server, passkeys, roles |
-| License | MIT | AGPL-3.0 | MIT | AGPL-3.0 | Apache-2.0 |
-| Activity | — | ~200 commits/month | quiet since 2026-07-28 | ~110 commits/month, releases every few days | started 2026-08-21, releases weekly |
+| | penny | Sure | KevFin | Securo | Tallyo | personal-finance-tracker |
+|---|---|---|---|---|---|---|
+| Membership / card worth-it | **yes — the point** | no | no | no | no | no |
+| Budget tracker | basic board | mature | solid | mature | solid | solid |
+| Bank sync | Plaid (own keys), CSV | ~20 providers incl. Plaid, SimpleFIN | Plaid, SimpleFIN | Pluggy, Enable Banking, SimpleFIN; OFX/QIF/CAMT/CSV — no Plaid | Plaid (own keys), SimpleFIN, EVM wallets, CSV | SimpleFIN; CSV, OFX/QFX — no Plaid |
+| Stack | Python, flat files | Rails, Postgres, Redis, Sidekiq | TypeScript, Express, SQLite | FastAPI, Postgres + pgvector, Redis, Celery | Rust, React, SQLite | TypeScript, Next.js, SQLite |
+| Hosting | local CLI + loopback board | Docker, 5 services | Docker / Electron | Docker (7 services), Helm | one binary or container | local Node process, no container |
+| Auth | none; loopback only | API keys, OAuth | none; LAN by design | JWT (24 h), TOTP, passkeys, OIDC | master password, own OAuth server, passkeys, roles | none; a token for the wall display only |
+| License | MIT | AGPL-3.0 | MIT | AGPL-3.0 | Apache-2.0 | MIT |
+| Activity | — | ~200 commits/month | quiet since 2026-07-28 | ~110 commits/month, releases every few days | started 2026-08-21, releases weekly | public since 2026-09-29, no releases |
 
 ## What penny needs from a transaction source
 
@@ -315,6 +315,88 @@ but not the API). Its sync is polling, so there's no internet-facing
 endpoint. Two limits: 90 days of history per linked bank, which is under
 penny's 365-day window, and a one-person project five weeks old.
 
+## personal-finance-tracker
+
+<https://github.com/gillespiejameson/personal-finance-tracker>, read at
+`552699f` (2026-09-30).
+
+A local, single-user tracker built around statement import: drop a CSV or
+OFX file in, and it works out which bank it came from, skips what it already
+has, pairs transfers between your own accounts and categorises by rules. On
+top sit budgets, a safe-to-spend figure, bills, goals, net worth, debt
+payoff, a cash-flow forecast, anomaly alerts and a weekly review.
+
+**Stack and hosting.** Next.js 16 with React server components and server
+actions, better-sqlite3 and Drizzle, one SQLite file; about 41k lines of
+TypeScript including tests. No Docker and no worker: `npm run app` builds,
+starts `next start` on port 3000 and opens a chromeless browser window. There
+is no scheduler either, so a sync happens when someone presses the button or
+opens Home more than six hours after the last attempt.
+
+**Bank sync.** SimpleFIN only, with your own setup token; **no Plaid**. The
+first sync reaches back 90 days, the most one SimpleFIN request allows, and
+"Load older history" steps back another 90 at a time. Later syncs re-fetch
+the last five days, capped at 20 requests a day. USD accounts only. File
+import covers CSV and OFX/QFX, with built-in profiles for seven US banks
+matched by header and a mapping wizard for the rest; PDFs are refused.
+
+**What it keeps per transaction** (`db/schema.ts`, `simplefin/map.ts`):
+
+| SimpleFIN field | In personal-finance-tracker |
+|---|---|
+| `id` | `transactions.external_id` |
+| `posted`, else `transacted_at` | `date`, as the UTC calendar day |
+| `description`, else `payee`, with `memo` appended | `raw_description` |
+| — | `merchant`, its own clean-up of the raw text plus aliases |
+| `pending`, or `posted` of 0 | `pending` (pending rows are stored and flagged) |
+| the rest of the payload | not kept |
+
+SimpleFIN sends no category, MCC or payment channel, so none exists to keep.
+Accounts have a name, type and institution but no mask, so the last four is
+only there if you type it into the name. Categories are its own two-level
+tree, assigned by rules: contains or regex on the merchant or the raw text,
+with direction, amount-range and account filters.
+
+**API.** None for transactions. The app's writes are server actions, and the
+only routes are a CSV download of the filtered list, a database snapshot
+download, and `GET /api/wall`, a summary for a wall display (safe to spend,
+bills due, budget progress, counts). The CSV carries date, account,
+merchant, raw description, amount, category and transfer flag, but no id and
+no pending flag. Reading its rows from outside means opening the SQLite
+file.
+
+**Features.** Feed-vs-file dedup (a synced row claims a CSV row already
+there), refund linking to the original charge, split transactions, recurring
+bill and paycheck detection by cadence and amount cluster, annual and
+quarterly expenses spread into a monthly set-aside, avalanche-vs-snowball
+debt payoff, and alerts for merchant and category spikes, bill jumps and
+double charges. Every import snapshots the database first and can be undone.
+
+**Rewards and memberships.** None. Costco and Walmart appear only as built-in
+category rules (groceries and general shopping). Credit accounts carry an APR
+and a minimum payment for the debt planner; there's no annual fee or reward
+rate field, and a fee is at most a bill with an annual cadence.
+
+**Security posture.** No login, stated plainly in its README and
+`SECURITY.md`. `next start` is launched with no host flag, so Next's default
+of all interfaces applies; the documented way to reach it from outside is a
+Cloudflare Tunnel with Cloudflare Access in front. The wall display is the
+one credential: a 32-byte token shown once, stored as a SHA-256 hash, that
+reads only the summary. The SimpleFIN access URL, credentials included, is
+plaintext in the `settings` table. No telemetry found; fixtures use made-up
+merchants, though they weren't audited row by row.
+
+**Health.** MIT. History starts at a single "Initial public release" commit
+on 2026-09-29; one author plus Dependabot, 11 commits, 15 stars, no tagged
+release. About 630 Vitest cases over the library code, no UI tests, CI with
+Biome.
+
+**As a transaction source.** Not a candidate. There's no Plaid and no API,
+and SimpleFIN gives it no category, MCC or last four, so of the list above it
+supplies only date, amount, the raw descriptor, a merchant name, a pending
+flag and an id that isn't exported. It is a finished-looking tracker for
+someone who imports statements by hand, one day into being public.
+
 ## Ideas worth borrowing
 
 - **A live match count in the rule editor** (KevFin's `RuleSuggestModal`):
@@ -323,8 +405,10 @@ penny's 365-day window, and a one-person project five weeks old.
 - **Fee detection from billing cadence** (KevFin `recurring.ts`): find the
   renewal in the feed from its yearly rhythm instead of only `fee_patterns`
   and `fee_amounts`, useful for memberships the catalogue doesn't list yet.
-- **Feed-vs-CSV dedup inside a date window** (KevFin): relevant if a CSV
-  import and the Plaid feed ever overlap the same card.
+- **Feed-vs-CSV dedup inside a date window** (KevFin;
+  personal-finance-tracker matches by feed id, then an exact hash, then
+  description similarity): relevant if a CSV import and the Plaid feed ever
+  overlap the same card.
 - **Append-only balance observations** where an estimate never overwrites a
   real reading (KevFin); penny's `balances.jsonl` is already append-only but
   has no estimated/real distinction.
@@ -345,11 +429,17 @@ penny's 365-day window, and a one-person project five weeks old.
   transactions): a shape for penny's board if it ever gets a login.
 - **A password-encrypted backup** (KevFin, Securo): penny's instance
   directory holds Plaid access tokens and has no export of its own.
+- **A hashed, summary-only display token** (personal-finance-tracker's
+  `/api/wall`): one revocable token that reads a few glanceable numbers and
+  nothing else, a smaller first step than a full login for penny's board.
+- **A snapshot before every import, with undo** (personal-finance-tracker):
+  a bad statement or CSV import is reversed in one step.
 
 ## What this doesn't change
 
 penny's security stance — loopback by default, no login yet, nothing
-listening on the network unless you ask — is stricter than KevFin's and
-simpler than Sure's or Tallyo's, and nothing here argues for loosening it. The rate
+listening on the network unless you ask — is stricter than KevFin's or
+personal-finance-tracker's and simpler than Sure's or Tallyo's, and nothing
+here argues for loosening it. The rate
 catalogue in `penny/defaults/rules.toml` has no counterpart in any of these
 projects.
