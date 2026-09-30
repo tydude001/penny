@@ -14,11 +14,20 @@ Each row keeps the fields a budget needs beside the ones the card math reads:
 - ``kind``: purchase, refund, payment, transfer, income, fee, interest,
   installment or reward credit. Income is only ever into a bank account. ``transfer`` is True for anything that moves
   money between accounts (card payments included), which is never spend.
+- ``wallet`` marks a payment app's balance account, and ``paid_by`` a wallet
+  row that another account's row paid for (``pair_wallets``).
 
 Plaid files a Chase card payment under ``LOAN_DISBURSEMENTS`` on the card and
 ``LOAN_PAYMENTS`` on the checking account; both halves are transfers. Money
 sent through PayPal, Venmo or Zelle is ``TRANSFER_OUT`` from SoFi: Plaid can't
 see what it bought, so it is a transfer here, not spend.
+
+A linked PayPal account does show what it bought, and then a purchase a card
+paid for through PayPal is in the feed twice: on the card, and again on
+PayPal. ``pair_wallets`` finds the PayPal half and makes it a transfer, so the
+card's row is the one that counts. A purchase PayPal paid from its own balance
+or from the bank (the bank's half is already a transfer) has no pair and stays
+spend.
 
 Pending rows are dropped; they count once posted.
 """
@@ -26,6 +35,7 @@ Pending rows are dropped; they count once posted.
 from __future__ import annotations
 
 import re
+from collections import defaultdict
 from datetime import date
 from pathlib import Path
 
@@ -37,6 +47,15 @@ TRANSFER_PRIMARY = ("TRANSFER_IN", "TRANSFER_OUT", "LOAN_PAYMENTS", "LOAN_DISBUR
 # A card payment Plaid left under OTHER (Chase's autopay, 2026-09).
 PAYMENT_NAME = re.compile(r"\bpayment\b.*\bthank", re.IGNORECASE)
 APPLE_ACCOUNT = "Apple Card"
+# Plaid's subtype for a payment app's balance account. Only the depository
+# account is a wallet: PayPal's credit card is a card like any other.
+WALLET_SUBTYPES = ("paypal",)
+# How far the paying row's date may sit from the wallet row's, in days. A card
+# authorises the same day, give or take a time zone; a debit from a bank can
+# post most of a week later. A monthly subscription's next charge is 28 days
+# off, so the window can't reach it.
+PAIR_DAYS_BEFORE = 2
+PAIR_DAYS_AFTER = 5
 OVERRIDES = Path("data") / "overrides.json"
 MERCHANTS = Path("data") / "merchants.json"  # the same, keyed by merchant
 
@@ -83,6 +102,7 @@ def from_plaid(store: plaid.Store) -> list[Txn]:
                 channel=t.get("payment_channel") or "",
                 mcc=t.get("merchant_category_code") or "",
                 account_type=a.get("type") or "",
+                wallet=a.get("type") == "depository" and a.get("subtype") in WALLET_SUBTYPES,
             ))
     return out
 
@@ -109,6 +129,43 @@ def from_apple(apple_dir: Path) -> list[Txn]:
     return out
 
 
+def pair_wallets(txns: list[Txn]) -> int:
+    """Mark each wallet purchase or refund that another account's row paid
+    for, and return how many. The pair is a row of the same kind and the same
+    amount to the cent, on an account that isn't a wallet, dated within
+    ``PAIR_DAYS_BEFORE``/``PAIR_DAYS_AFTER`` of the wallet's. The wallet row
+    becomes a transfer with ``paid_by`` naming its pair; the paying row is
+    untouched, because that is the row the card earned on.
+
+    Merchant names can't decide a pair: the wallet says "Valve" where the card
+    says "Steam". They only break a tie, ahead of the nearer date. Each paying
+    row is used once, so two same-priced purchases on one day pair one to one.
+    """
+    payers: dict[tuple[str, int], list[Txn]] = defaultdict(list)
+    for t in txns:
+        if not t.wallet and not t.transfer and t.kind in ("purchase", "refund"):
+            payers[(t.kind, round(t.amount * 100))].append(t)
+    used: set[int] = set()
+    paired = 0
+    for w in sorted((t for t in txns if t.wallet and t.kind in ("purchase", "refund")), key=lambda t: t.date):
+        best = None
+        for o in payers.get((w.kind, round(w.amount * 100)), ()):
+            gap = (o.date - w.date).days
+            if id(o) in used or not -PAIR_DAYS_BEFORE <= gap <= PAIR_DAYS_AFTER:
+                continue
+            same = bool(w.description) and w.description.lower() == o.description.lower()
+            rank = (not same, abs(gap))
+            if best is None or rank < best[0]:
+                best = (rank, o)
+        if best:
+            o = best[1]
+            used.add(id(o))
+            w.paid_by = o.txn_id or o.account
+            w.kind, w.transfer = "transfer", True
+            paired += 1
+    return paired
+
+
 def is_spend(t: Txn) -> bool:
     """Counts toward spend: not a transfer or payment, not income."""
     return not t.transfer and t.kind != "income"
@@ -120,6 +177,7 @@ def load(root: Path, env: str = "production", *, spend_only: bool = True) -> lis
     ``spend_only`` drops transfers, card payments and income, as the Rocket
     Money loader's ``exclude_categories`` did."""
     txns = from_plaid(plaid.Store(root, env)) + from_apple(root / "data" / "apple") + csvimport.load(root / csvimport.IMPORTS)
+    pair_wallets(txns)
     if spend_only:
         txns = [t for t in txns if is_spend(t)]
     txns.sort(key=lambda t: t.date)

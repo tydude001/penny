@@ -45,6 +45,8 @@ class Txn:
     mcc: str = ""  # merchant category code, where Plaid has one
     budget_category: str = ""  # what the money was for (categorize.assign_categories); `category` is the source's own
     account_type: str = ""  # Plaid's account type: credit, depository; Apple Card is credit
+    wallet: bool = False  # a payment app's balance account (feed.WALLET_SUBTYPES), which a card can pay through
+    paid_by: str = ""  # on a wallet row another account's row paid for: that row's txn_id (feed.pair_wallets)
 
     @property
     def match_text(self) -> str:

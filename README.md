@@ -169,7 +169,8 @@ a fresh link. See `penny plaid --help` for the rest.
 ## Layout
 
 - `penny/load.py`, `penny/feed.py` — CSV and Plaid transactions → `Txn`,
-  sign and transfers normalised
+  sign and transfers normalised, and a card purchase made through a linked
+  PayPal counted once, on the card
 - `penny/categorize.py` — merchant regex + category fallback → family
 - `penny/model.py` — the membership math above
 - `penny/report.py` — text tables
