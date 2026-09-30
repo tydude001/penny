@@ -179,3 +179,97 @@ def test_without_overrides_the_rules_stand(tmp_path):
     store_with(tmp_path, [prow("pizza", 32.0, "OTHER", "OTHER_OTHER", name="Rosati's Pizza")])
     (t,) = feed.labelled(tmp_path, _rules())
     assert (t.family, t.budget_category) == (cat.OTHER, cat.UNCATEGORISED)
+
+
+# --- a purchase a card paid through PayPal is in the feed twice ---
+
+def wallet_store(tmp_path, rows):
+    store = plaid.Store(tmp_path, "production")
+    store.save_items({"i": {"access_token": "t"}})
+    store.save_ledger("i", {"accounts": {"c": {"name": "CREDIT CARD", "mask": "2002", "type": "credit", "subtype": "credit card"},
+                                         "s": {"name": "Checking", "mask": "2009", "type": "depository", "subtype": "checking"},
+                                         "w": {"name": "PayPal", "mask": "", "type": "depository", "subtype": "paypal"},
+                                         "wc": {"name": "PayPal Credit Card", "mask": "2010", "type": "credit", "subtype": "paypal"}},
+                            "transactions": {r["transaction_id"]: r for r in rows}})
+    return store
+
+
+SHOP = ("GENERAL_MERCHANDISE", "GENERAL_MERCHANDISE_OTHER_GENERAL_MERCHANDISE")
+
+
+def _loaded(tmp_path, rows, **kw):
+    wallet_store(tmp_path, rows)
+    return {t.txn_id: t for t in feed.load(tmp_path, **kw)}
+
+
+def test_a_card_purchase_paid_through_paypal_counts_once_on_the_card(tmp_path):
+    rows = [prow("card", 23.0, *SHOP, authorized="2026-09-08", merchant="Steam"),
+            prow("pp", 23.0, *SHOP, acct="w", authorized="2026-09-08", merchant="Valve")]  # names differ, as they do live
+    txns = _loaded(tmp_path, rows, spend_only=False)
+    assert (txns["pp"].kind, txns["pp"].transfer, txns["pp"].paid_by) == ("transfer", True, "card")
+    assert (txns["card"].kind, txns["card"].transfer, txns["card"].paid_by) == ("purchase", False, "")
+    assert list(_loaded(tmp_path, rows)) == ["card"]
+
+
+def test_a_paypal_purchase_with_no_paying_row_stays_spend(tmp_path):
+    """Paid from PayPal's balance, or from the bank: the bank's half is a
+    transfer naming PayPal, which is not a purchase and so is no pair."""
+    rows = [prow("pp", 60.0, *SHOP, acct="w", authorized="2026-09-08"),
+            prow("bank", 60.0, "TRANSFER_OUT", "TRANSFER_OUT_TRANSFER_OUT_FROM_APPS", acct="s", authorized="2026-09-09"),
+            prow("near", 60.01, *SHOP, authorized="2026-09-08"),         # a cent off
+            prow("late", 60.0, *SHOP, authorized="2026-10-08"),          # next month's charge
+            prow("back", -60.0, *SHOP, authorized="2026-09-08")]         # a refund is not a purchase
+    txns = _loaded(tmp_path, rows, spend_only=False)
+    assert (txns["pp"].kind, txns["pp"].paid_by) == ("purchase", "")
+    assert sorted(_loaded(tmp_path, rows)) == ["back", "late", "near", "pp"]
+
+
+def test_the_pairing_window_holds_a_bank_debit_and_stops_there(tmp_path):
+    def paired(gap_day):
+        rows = [prow("pp", 15.0, *SHOP, acct="w", authorized="2026-09-10"),
+                prow("debit", 15.0, *SHOP, acct="s", authorized=f"2026-09-{gap_day:02d}")]
+        return _loaded(tmp_path, rows, spend_only=False)["pp"].paid_by == "debit"
+
+    assert [d for d in range(6, 18) if paired(d)] == list(range(10 - feed.PAIR_DAYS_BEFORE, 10 + feed.PAIR_DAYS_AFTER + 1))
+
+
+def test_each_paying_row_pairs_once_and_a_matching_merchant_wins_the_tie(tmp_path):
+    rows = [prow("pp1", 4.99, *SHOP, acct="w", authorized="2026-09-08", merchant="Valve"),
+            prow("pp2", 4.99, *SHOP, acct="w", authorized="2026-09-08", merchant="Tebex"),
+            prow("pp3", 4.99, *SHOP, acct="w", authorized="2026-09-08", merchant="Valve"),   # a third with no card row
+            prow("cardA", 4.99, *SHOP, authorized="2026-09-08", merchant="Steam"),
+            prow("cardB", 4.99, *SHOP, authorized="2026-09-08", merchant="Tebex")]
+    txns = _loaded(tmp_path, rows, spend_only=False)
+    assert txns["pp2"].paid_by == "cardB"
+    assert sorted(t.paid_by for t in (txns["pp1"], txns["pp3"])) == ["", "cardA"]
+    # three bought, two on a card: the feed counts three
+    assert round(sum(t.amount for t in _loaded(tmp_path, rows).values()), 2) == 14.97
+
+
+def test_a_refund_through_paypal_pairs_with_the_cards_refund(tmp_path):
+    rows = [prow("card", -30.0, *SHOP, authorized="2026-09-08"),
+            prow("pp", -30.0, *SHOP, acct="w", authorized="2026-09-07")]
+    txns = _loaded(tmp_path, rows, spend_only=False)
+    assert txns["pp"].paid_by == "card" and txns["pp"].transfer
+    assert [t.amount for t in _loaded(tmp_path, rows).values()] == [-30.0]
+
+
+def test_paypals_credit_card_is_a_card_not_a_wallet(tmp_path):
+    """Its purchases are real card spend, and it can be the card that paid."""
+    rows = [prow("ppc", 80.0, *SHOP, acct="wc", authorized="2026-09-08"),
+            prow("pp", 80.0, *SHOP, acct="w", authorized="2026-09-08"),
+            prow("alone", 12.0, *SHOP, acct="wc", authorized="2026-09-08")]
+    txns = _loaded(tmp_path, rows, spend_only=False)
+    assert (txns["ppc"].wallet, txns["pp"].wallet) == (False, True)
+    assert txns["pp"].paid_by == "ppc"
+    assert sorted(_loaded(tmp_path, rows)) == ["alone", "ppc"]
+
+
+def test_a_paired_wallet_row_is_a_transfer_to_the_categoriser(tmp_path):
+    rows = [prow("card", 23.0, *SHOP, authorized="2026-09-08", name="Walmart", channel="online"),
+            prow("pp", 23.0, *SHOP, acct="w", authorized="2026-09-08", name="Walmart", channel="online")]
+    wallet_store(tmp_path, rows)
+    (tmp_path / "rules.toml").write_text((INSTANCE / "rules.toml").read_text())
+    txns = {t.txn_id: t for t in feed.labelled(tmp_path, _rules(), spend_only=False)}
+    assert txns["pp"].budget_category == "transfer"
+    assert txns["card"].family == "walmart_online"
