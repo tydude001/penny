@@ -19,16 +19,16 @@ work ahead of penny's board there. The open question is therefore not
 "switch?" but "should penny keep growing its own tracker, or read
 transactions from one?" — see [Sure as a transaction source](#sure-as-a-transaction-source).
 
-| | penny | Sure | KevFin | Securo | Tallyo | personal-finance-tracker |
-|---|---|---|---|---|---|---|
-| Membership / card worth-it | **yes — the point** | no | no | no | no | no |
-| Budget tracker | basic board | mature | solid | mature | solid | solid |
-| Bank sync | Plaid (own keys), CSV | ~20 providers incl. Plaid, SimpleFIN | Plaid, SimpleFIN | Pluggy, Enable Banking, SimpleFIN; OFX/QIF/CAMT/CSV — no Plaid | Plaid (own keys), SimpleFIN, EVM wallets, CSV | SimpleFIN; CSV, OFX/QFX — no Plaid |
-| Stack | Python, flat files | Rails, Postgres, Redis, Sidekiq | TypeScript, Express, SQLite | FastAPI, Postgres + pgvector, Redis, Celery | Rust, React, SQLite | TypeScript, Next.js, SQLite |
-| Hosting | local CLI + loopback board | Docker, 5 services | Docker / Electron | Docker (7 services), Helm | one binary or container | local Node process, no container |
-| Auth | none; loopback only | API keys, OAuth | none; LAN by design | JWT (24 h), TOTP, passkeys, OIDC | master password, own OAuth server, passkeys, roles | none; a token for the wall display only |
-| License | MIT | AGPL-3.0 | MIT | AGPL-3.0 | Apache-2.0 | MIT |
-| Activity | — | ~200 commits/month | quiet since 2026-07-28 | ~110 commits/month, releases every few days | started 2026-08-21, releases weekly | public since 2026-09-29, no releases |
+| | penny | Sure | KevFin | Securo | Tallyo | personal-finance-tracker | fungible | Helius |
+|---|---|---|---|---|---|---|---|---|
+| Membership / card worth-it | **yes — the point** | no | no | no | no | no | no | no |
+| Budget tracker | basic board | mature | solid | mature | solid | solid | scorecard vs 12-month median, no budgets | budgets, bills, reconciliation |
+| Bank sync | Plaid (own keys), CSV | ~20 providers incl. Plaid, SimpleFIN | Plaid, SimpleFIN | Pluggy, Enable Banking, SimpleFIN; OFX/QIF/CAMT/CSV — no Plaid | Plaid (own keys), SimpleFIN, EVM wallets, CSV | SimpleFIN; CSV, OFX/QFX — no Plaid | Plaid (own keys), CSV | CSV presets, camt.053 — no Plaid |
+| Stack | Python, flat files | Rails, Postgres, Redis, Sidekiq | TypeScript, Express, SQLite | FastAPI, Postgres + pgvector, Redis, Celery | Rust, React, SQLite | TypeScript, Next.js, SQLite | TypeScript, Ink TUI + Electron, SQLite | Rust, SQLite |
+| Hosting | local CLI + loopback board | Docker, 5 services | Docker / Electron | Docker (7 services), Helm | one binary or container | local Node process, no container | local TUI or desktop app | one binary or container |
+| Auth | none; loopback only | API keys, OAuth | none; LAN by design | JWT (24 h), TOTP, passkeys, OIDC | master password, own OAuth server, passkeys, roles | none; a token for the wall display only | none; loopback, optional API key | none; local file |
+| License | MIT | AGPL-3.0 | MIT | AGPL-3.0 | Apache-2.0 | MIT | MIT | AGPL-3.0 |
+| Activity | — | ~200 commits/month | quiet since 2026-07-28 | ~110 commits/month, releases every few days | started 2026-08-21, releases weekly | public since 2026-09-29, no releases | started 2026-05-22, releases weekly | started 2026-03-17, one author |
 
 ## What penny needs from a transaction source
 
@@ -397,6 +397,101 @@ supplies only date, amount, the raw descriptor, a merchant name, a pending
 flag and an id that isn't exported. It is a finished-looking tracker for
 someone who imports statements by hand, one day into being public.
 
+## fungible
+
+<https://github.com/tomfunk/fungible>, read at `7212a8d` (2026-10-12).
+
+A keyboard-first personal-finance app for one person: a terminal UI and an
+Electron desktop app over the same local database. Plaid sync and CSV
+import, category and rename rules, tags, trends, net worth, a "financial
+health" page (runway, FIRE number), and an MCP server and HTTP API so an
+assistant can read and edit it.
+
+**Stack and hosting.** TypeScript on Node 22: Ink (React for the terminal)
+for the TUI, Electron for the GUI, libsql for one SQLite file at
+`~/.fungible/fungible.db` (`core/db.ts`). Homebrew tap or from source;
+unsigned installers for macOS, Windows and Linux. No server and no
+container: it runs while the TUI or app is open. Daily backups, seven kept.
+
+**Bank sync.** Plaid with your own keys, `/transactions/sync` with a cursor
+per item (`core/sync.ts`). There is no scheduler: a sync runs at launch or
+on demand, at most once per item per 15 minutes unless forced. Removed rows
+are deleted, pending rows are stored with a flag and overwritten when they
+post. OAuth banks go through a Link popup, or a full-page redirect served
+over HTTPS on `localhost` with a mkcert certificate — the README walks
+through it. CSV import has column mapping, a per-file hash and an imports
+table so a file is recorded once.
+
+**What it keeps from Plaid** (`core/sync.ts`, `core/db.ts`):
+
+| Plaid field | In fungible |
+|---|---|
+| `transaction_id` | `transactions.id` |
+| `date` | `date`; a hand-moved date keeps the posting date in `original_date` |
+| `name`, `merchant_name` | both, separately |
+| `personal_finance_category.primary` | `raw_category`, then mapped to its own ~20 categories |
+| `personal_finance_category.detailed` | not kept |
+| `pending` | `pending` |
+| account `mask` | `accounts.mask` |
+| `original_description`, `payment_channel`, `merchant_category_code` | not kept |
+
+**API.** The same tool set serves MCP (stdio, or HTTP on 3741 while the TUI
+runs) and a REST API on 3456 (`POST /tools/<name>`). About forty tools
+(`core/tools.ts`): list, edit, tag and ignore transactions, add rules,
+spending and merchant summaries, scorecard, net worth, balances, a sync
+trigger, CSV export. `list_transactions` returns date, name, amount,
+category, account and id; no pending flag, merchant or mask. Both servers
+bind `127.0.0.1`, refuse a non-local `Host` or `Origin` (DNS rebinding), cap
+bodies at 1 MiB, and take an optional bearer key that becomes mandatory
+before either will bind a non-local address (`docs/integrations.md`).
+
+**Features.** Rules are substring or regex on the name, with optional
+amount range and account, and survive re-syncs; a second rule type renames.
+The scorecard flags categories over or under a 12-month median only when
+the gap clears both a dollar floor and a share of that category's baseline
+(`core/scorecard.ts`). CSV-vs-Plaid dedup pairs rows one-to-one inside ±3
+days, ranked by name match, then date, so two real $5 coffees aren't both
+deleted for one Plaid row (`core/dedup.ts`); manual entries are only ever
+offered for review, never auto-deleted. A transaction can be moved to the
+period it belongs to without losing its posting date. An in-app assistant
+uses Anthropic or OpenAI with your own key.
+
+**Rewards and memberships.** None. Accounts carry an APR; no source file
+read mentions an annual fee, reward rate or membership.
+
+**Security posture.** Plaid access tokens are AES-256-GCM encrypted with a
+key file created `0600` next to the database (`core/crypto.ts`). The
+servers' defaults are described above. Fixtures and the demo data were not
+audited.
+
+**Health.** MIT. Created 2026-05-22; 114 stars; one main author (491
+commits) and one regular contributor (49); v1.10.1 on 2026-10-11, releases
+roughly weekly. CI on GitHub Actions.
+
+**As a transaction source.** Not a candidate. Of the list above it supplies
+date, amount, both name fields, a pending flag, an id and the last four,
+but drops Plaid's detailed category — the one penny's family fallback and
+`[categories.plaid]` are keyed on — along with MCC and payment channel, and
+its API doesn't return the pending flag or the mask. It is also not running
+unless someone has it open. The closest project yet to penny's shape,
+though: local, single-user, Plaid with your own keys, and nothing listening
+beyond loopback by default.
+
+## Helius
+
+<https://github.com/Helius-Finance/helius-finance-tracker>, read at
+`54b34ce` (2026-10-12). **README only**; the source was not read.
+
+A local-first ledger: one Rust binary that is a TUI, a guided shell and a
+CLI over one SQLite file. Budgets, recurring bills, reconciliation against
+statements, a 90-day cash-flow forecast with what-if scenarios, savings
+goals, JSON output for scripts. Import is 25 CSV presets (four US banks:
+Chase, Bank of America, Wells Fargo, Citi; the rest UK and EU) plus ISO
+20022 `camt.053` XML, each with a `--dry-run` that shows what would be
+written. **No bank sync.** AGPL-3.0, created 2026-03-17, 206 stars, one
+author. Not a transaction source; listed for the import dry-run and the
+statement reconciliation, which `penny check` overlaps.
+
 ## Ideas worth borrowing
 
 - **A live match count in the rule editor** (KevFin's `RuleSuggestModal`):
@@ -434,6 +529,22 @@ someone who imports statements by hand, one day into being public.
   nothing else, a smaller first step than a full login for penny's board.
 - **A snapshot before every import, with undo** (personal-finance-tracker):
   a bad statement or CSV import is reversed in one step.
+- **One-to-one dedup pairing** (fungible `core/dedup.ts`): when a CSV or
+  hand-entered row and a feed row are matched inside a date window, pair
+  them greedily, best name match first, so one feed row cancels at most one
+  other row and two genuine identical purchases both survive.
+- **A drift threshold with two floors** (fungible's scorecard): a category
+  is over or under its 12-month median only when the gap clears both a
+  dollar floor and a share of its own baseline — a shape for any "this
+  family is running hot" signal on the board.
+- **Re-dating without losing the posting date** (fungible's
+  `original_date`): a paycheck or a late-cashed check moved to the period it
+  belongs to, with the bank's date kept beside it for reconciliation.
+- **Encrypt the Plaid access tokens at rest** (fungible `core/crypto.ts`:
+  AES-256-GCM, a `0600` key file beside the data), a smaller step than the
+  password-encrypted backup above.
+- **A `--dry-run` on every import** (Helius): print what would be written,
+  write nothing.
 
 ## What this doesn't change
 
