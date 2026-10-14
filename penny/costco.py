@@ -51,7 +51,9 @@ def receipts(capture: list[dict]) -> list[dict]:
     for hit in capture:
         rwc = ((hit.get("body") or {}).get("data") or {}).get("receiptsWithCounts") or {}
         for r in rwc.get("receipts") or []:
-            if r.get("transactionBarcode"):
+            # A date-range search lists receipts as undated stubs (barcode and
+            # item numbers only); only an opened receipt counts.
+            if r.get("transactionBarcode") and r.get("transactionDate"):
                 by_code[r["transactionBarcode"]] = r
     return sorted(by_code.values(), key=lambda r: str(r.get("transactionDate")))
 

@@ -56,3 +56,10 @@ def test_measured_sums_warehouse_pretax_over_a_span_that_includes_gas(tmp_path):
     assert m.pretax == pytest.approx(11.99 + 13.89 - 3.50 + 12.49)
     assert m.days == 28 and m.annual == pytest.approx(m.pretax * 365 / 28)
     assert costco.newest_measured(tmp_path) is None
+
+
+def test_receipts_skip_undated_search_stubs():
+    stub = {"body": {"data": {"receiptsWithCounts": {"inWarehouse": 1, "receipts": [
+        {"transactionBarcode": "A", "receiptType": "In-Warehouse", "itemArray": [{"itemNumber": "111"}]}]}}}}
+    raw = costco.receipts(CAPTURE + [stub])  # a replayed search lands after the opened receipt
+    assert raw[0]["transactionDate"] == "2026-01-07" and len(raw[0]["itemArray"]) == 3
