@@ -6,11 +6,19 @@ netted, plus the payments off the feed. A key is the category with spaces as
 underscores (``personal_care``), since the board writes bare TOML keys. A
 budget of 0 means none is set: the category is shown with its average, not
 as a zero-dollar budget blown.
+
+A category is *running hot* when the month spent more than its median month
+over the full months given, and the gap clears both floors in rules.toml
+``[running_hot]``: a dollar amount and a share of that median (the shape is
+fungible's scorecard, docs/competitors.md § fungible). The month to date is
+compared as it stands, never projected: a hot flag mid-month means it has
+already passed a typical whole month.
 """
 
 from __future__ import annotations
 
 import calendar
+import statistics
 from dataclasses import dataclass
 from datetime import date
 
@@ -32,6 +40,7 @@ class Line:
     budget: float  # 0: none set
     actual: float
     average: float  # a month, over the full months given
+    median: float = 0.0  # the median month over the same full months, a month with none counting as 0
 
     @property
     def left(self) -> float:
@@ -49,7 +58,8 @@ def lines(month: Month, full: list[Month], budget: dict) -> list[Line]:
         avg = sum(m.spent.get(c, 0.0) for m in full) / n if n else 0.0
         k = keyed.get(c)
         b = float(budget.get(k, 0) or 0) if k else 0.0
-        out.append(Line(c, k, b, month.spent.get(c, 0.0), avg))
+        med = statistics.median(m.spent.get(c, 0.0) for m in full) if n else 0.0
+        out.append(Line(c, k, b, month.spent.get(c, 0.0), avg, med))
     out.sort(key=lambda ln: (ln.budget <= 0, -ln.budget, -ln.actual, -ln.average, ln.category))
     return [ln for ln in out if ln.key or round(ln.actual) or round(ln.average)]
 
@@ -61,3 +71,20 @@ def elapsed(month_key: str, today: date) -> float | None:
     if (today.year, today.month) != (y, m):
         return None
     return today.day / calendar.monthrange(y, m)[1]
+
+
+HOT_MIN_MONTHS = 3  # fewer full months than this and a median is one or two months, not a baseline
+HOT_DEFAULTS = {"dollars": 50.0, "share": 0.25}  # as penny/defaults/rules.toml [running_hot]
+
+
+def hot_floors(rules: dict) -> tuple[float, float]:
+    """The dollar and share floors from ``[running_hot]``, else the defaults."""
+    t = {**HOT_DEFAULTS, **rules.get("running_hot", {})}
+    return float(t["dollars"]), float(t["share"])
+
+
+def running_hot(ln: Line, months: int, dollars: float, share: float) -> bool:
+    """Over the median month by more than ``dollars`` and by more than ``share``
+    of that median; never on fewer than HOT_MIN_MONTHS full months."""
+    gap = ln.actual - ln.median
+    return months >= HOT_MIN_MONTHS and gap > 0 and gap >= dollars and gap >= share * ln.median

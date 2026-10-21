@@ -2841,8 +2841,15 @@ def _hero(s: State, sel: cashflow.Month, full: list[cashflow.Month], lines: list
             f"<p class=muted>{sub}</p><div class=prog>{fill}{pace}</div><div class='legend faint'>{legend}</div></section>")
 
 
-def _attention(v: View, lines: list[budget.Line], found: list[recurring.Recurring]) -> str:
-    """Only what needs a look: a deadline on To do, a category over budget, a price rise, open questions."""
+def _hot(s: State, lines: list[budget.Line], months: int) -> list[budget.Line]:
+    """The lines running hot (budget.running_hot), biggest gap first; one already over its budget says so instead."""
+    dollars, share = budget.hot_floors(s.rules)
+    hot = [ln for ln in lines if budget.running_hot(ln, months, dollars, share) and not (ln.budget > 0 and ln.actual > ln.budget + 0.5)]
+    return sorted(hot, key=lambda ln: -(ln.actual - ln.median))
+
+
+def _attention(v: View, lines: list[budget.Line], found: list[recurring.Recurring], months: int = 0) -> str:
+    """Only what needs a look: a deadline on To do, a category over budget or running hot, a price rise, open questions."""
     s = v.s
     out = []
     for it in v.items:
@@ -2851,6 +2858,8 @@ def _attention(v: View, lines: list[budget.Line], found: list[recurring.Recurrin
     for ln in lines:
         if ln.budget > 0 and ln.actual > ln.budget + 0.5:
             out.append(("crit", f"<b>{escape(_cap(ln.category))} is {usd(ln.actual - ln.budget)} over budget.</b> <span class=muted>{usd(ln.actual)} of {usd(ln.budget)}.</span>"))
+    for ln in _hot(s, lines, months):
+        out.append(("warn", f"<b>{escape(_cap(ln.category))} is running hot.</b> <span class=muted>{usd(ln.actual)}, {usd(ln.actual - ln.median)} over its median month of {usd(ln.median)}.</span>"))
     for r in found:
         if not r.stopped and r.before is not None and r.amount > r.before and (s.today - r.last).days <= RISE_DAYS:
             out.append(("warn", f"<b>{escape(r.merchant)} went up.</b> <span class=muted>${r.amount:,.2f} {escape(r.cadence)}, was ${r.before:,.2f}.</span>"))
@@ -2963,7 +2972,7 @@ def render_page(s: State, v: View | None = None) -> str:
     found = recurring.find(s.txns, s.today, recurring_counts(s))
     body = [
         f"<p class='today faint'>{s.today:%A %-d %B}</p>",
-        "<div class='cols ovc ov-top'>", _hero(s, sel, full, lines), _attention(v, lines, found) or "<span></span>", "</div>",
+        "<div class='cols ovc ov-top'>", _hero(s, sel, full, lines), _attention(v, lines, found, len(full)) or "<span></span>", "</div>",
         _balances(s),
         "<div class='cols even ovc'>", _coming(s, found), _where(sel, lines), "</div>",
         "<div class='cols even ovc'>", _recent(s), _flow(s, months, full), "</div>",
@@ -3431,6 +3440,7 @@ def render_budget(s: State, v: View | None = None, month: str | None = None) -> 
     span = f"the last {n} full months" if n == CASH_YEAR else f"the {n} full month{'s' if n != 1 else ''} on file, under a year"
     set_ = [ln for ln in lines if ln.budget > 0]
     unset = [ln for ln in lines if ln.budget <= 0]
+    hot = {ln.category for ln in _hot(s, lines, n)}
     total_b = sum(ln.budget for ln in set_)
     total_a = sum(ln.actual for ln in set_)
     left = total_b - total_a
@@ -3445,6 +3455,8 @@ def render_budget(s: State, v: View | None = None, month: str | None = None) -> 
     def bar(ln: budget.Line) -> str:
         href = escape(_txn_href({}, cat=ln.category, m=sel.key))
         name = f"<a href='{href}'>{escape(_cap(ln.category))}</a>"
+        if ln.category in hot:
+            name += f" <small class=warnc title='{usd(ln.actual - ln.median)} over its median month of {usd(ln.median)}'>running hot</small>"
         if ln.budget <= 0:
             return f"<div><span>{name} <i>avg {usd(ln.average)}</i></span><span class=mono>{usd(ln.actual)}</span></div>"
         top = max(ln.budget, ln.actual) or 1.0
@@ -3463,6 +3475,10 @@ def render_budget(s: State, v: View | None = None, month: str | None = None) -> 
     note = ("The tick is where an even month would be today. " if gone is not None and set_ else "") + f"Averages over {span}."
     if not set_:
         note = f"Averages over {span}."
+    if hot:
+        dollars, share = budget.hot_floors(s.rules)
+        note += (f" Running hot: over its median month by at least {usd(dollars)} and {share:.0%} of that median "
+                 "(<code>rules.toml</code> <code>[running_hot]</code>).")
 
     inputs = []
     for ln in sorted(lines, key=lambda ln: (-ln.average, ln.category)):
