@@ -202,6 +202,19 @@ BANK_FEES = "fees and interest"
 # 2026-09-27; no Citi payment out of SoFi yet to take its wording from.
 feed_card_payees = ["CHASE CREDIT CRD", "APPLECARD GSBANK", "ONEPAY CASHREWRD", "WELLS FARGO CARD"]
 
+[running_hot]
+# A budget category is "running hot" (overview, Needs a look; Budget page)
+# when the month spent more than its 12-month median AND the gap is at least
+# `dollars` AND at least `share` of that median. Both floors, because either
+# alone misfires: a share alone flags a $12 category that spent $20, and a
+# dollar floor alone flags a $900 grocery month that ran $60 over, an
+# ordinary extra trip. $50 is about the smallest overspend worth stopping for;
+# 25% is past the swing of an extra week's shopping in a steady category, so
+# a big category needs a real jump ($200 on an $800 median) and a small one
+# needs the $50. Raise either to hear less.
+dollars = 50
+share = 0.25
+
 # ---------------------------------------------------------------------------
 # Cards. `rates` by family key; anything not listed earns `default_rate`.
 
