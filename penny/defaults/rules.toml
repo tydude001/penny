@@ -211,7 +211,10 @@ feed_card_payees = ["CHASE CREDIT CRD", "APPLECARD GSBANK", "ONEPAY CASHREWRD", 
 # ordinary extra trip. $50 is about the smallest overspend worth stopping for;
 # 25% is past the swing of an extra week's shopping in a steady category, so
 # a big category needs a real jump ($200 on an $800 median) and a small one
-# needs the $50. Raise either to hear less.
+# needs the $50. Raise either to hear less. Read on real data 2026-10-28: it
+# fires (Jul 7, Aug 7, Sep 4 categories), but with budgets near the medians
+# nearly every flag is also over budget, which the overview shows instead, so
+# it is rarely seen. Kept as is (Tyler's call).
 dollars = 50
 share = 0.25
 
