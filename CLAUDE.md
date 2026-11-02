@@ -63,3 +63,6 @@ uv run penny board                         # decision board, loopback by default
 ```
 
 See `README.md` for the CSV-import and Plaid quick start.
+
+A checkout with an instance in `./home` can pass a suite that CI, which has
+none, fails: before pushing a CLI change, run `uv run pytest` in a clean clone.
