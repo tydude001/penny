@@ -13,10 +13,12 @@
 //      date filter at its default, so the list runs back as far as it can.
 //   2. DevTools (F12) > Console. If Chrome asks, type `allow pasting`.
 //   3. Paste this whole file, press Enter. It prints "capturing".
-//   4. Open one order's details. Each captured response prints a line. That
-//      teaches the replay the order request's shape; the list's own first
-//      page teaches it the paging. If you have in-store orders too, open one
-//      of those as well.
+//   4. Open one order's details, then go back to Purchase History (the
+//      browser's Back button, or the Purchase History link). Each captured
+//      response prints a line. The order teaches the replay how to open one;
+//      the list, loaded again while this listens, teaches it the paging. The
+//      list's first load happened before the paste, so it was missed. If you
+//      have in-store orders too, open one of those as well.
 //   5. Run  __wmReplay("2024-11-01")  . It pages the list back to that date,
 //      then opens every order listed from then on. One request at a time, so
 //      two years takes a few minutes; it prints progress.
@@ -180,7 +182,9 @@
       if (p) { tmpl = r; path = p; }
     }
     if (!tmpl) {
-      console.warn("found no page cursor in the order list's requests -- send Claude the lines below");
+      console.warn(requests.some(r => /\/PurchaseHistory/.test(r.url))
+        ? "found no page cursor in the order list's requests -- send Claude the lines below"
+        : "the order list hasn't loaded since the paste -- go back to Purchase History (Back button or its link), wait for a captured line, then replay again");
       // Variable names and short values only; no headers.
       const all = requests.filter(r => /\/PurchaseHistory/.test(r.url));
       console.log(`order-list requests seen: ${all.length} (${history.length} with readable variables); cursors handed out: ${[...cursors].join(", ") || "none"}`);
@@ -252,5 +256,5 @@
     console.log(`wrote ${hits.length} responses to ${a.download}`);
   };
 
-  console.log("capturing. open one order, then __wmReplay(\"2024-11-01\") and/or __wmDump()");
+  console.log("capturing. open one order, go back to the order list, then __wmReplay(\"2024-11-01\") and/or __wmDump()");
 })();
