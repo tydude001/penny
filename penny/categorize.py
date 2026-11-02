@@ -50,6 +50,7 @@ class Family:
 
 
 FeeRule = tuple[list[re.Pattern], list[float] | None]
+FEE_GAP = 300  # days: a membership bills a fee amount at most once in this span
 
 
 def prorated_upgrades(m: dict) -> list[float]:
@@ -97,9 +98,35 @@ class FeeFamily(Family):
     def __init__(self, memberships: dict):
         super().__init__(FEES, "Membership fees", [], [])
         self.rules = fee_rules(memberships)
+        self.upgrades = {k: prorated_upgrades(m) for k, m in memberships.items()}
 
     def matches(self, t: Txn) -> bool:
         return any(is_fee(t, r) for r in self.rules.values())
+
+    def not_fees(self, txns: list[Txn]) -> list[Txn]:
+        """Rows that match a fee only by amount, and that the billing pattern
+        says are trips. Where a fee is told apart by its amount alone (Plaid
+        names Costco's fee plain "Costco", like a warehouse trip), a $65.00 or
+        $37.92 trip matches too. A membership bills each fee amount at most
+        once a year and one upgrade a year, so a repeat of an amount within
+        FEE_GAP days, or a second upgrade amount, is a trip. Refunds stay
+        fees: the charge a refund undoes can fall before the data starts."""
+        out = []
+        for key, rule in self.rules.items():
+            if rule[1] is None:  # told apart by pattern: nothing to thin
+                continue
+            upgrades = set(self.upgrades.get(key, ()))
+            rows = sorted((t for t in txns if t.amount > 0 and t.family == FEES and is_fee(t, rule)), key=lambda t: t.date)
+            last: dict[object, object] = {}  # amount (or "upgrade") -> date of the last charge kept
+            for t in rows:
+                amt = round(t.amount, 2)
+                cls = "upgrade" if amt in upgrades else amt
+                prev = last.get(cls)
+                if prev is not None and (t.date - prev).days < FEE_GAP:
+                    out.append(t)
+                else:
+                    last[cls] = t.date
+        return out
 
 
 def build_families(rules: dict) -> list[Family]:
@@ -127,6 +154,10 @@ def build_families(rules: dict) -> list[Family]:
 def categorize(txns: list[Txn], families: list[Family]) -> list[Txn]:
     for t in txns:
         t.family = next((f.key for f in families if f.matches(t)), OTHER)
+    for f in families:
+        if isinstance(f, FeeFamily):
+            for t in f.not_fees(txns):
+                t.family = next((g.key for g in families if g is not f and g.matches(t)), OTHER)
     return txns
 
 

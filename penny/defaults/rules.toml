@@ -246,12 +246,17 @@ rates = { restaurants = 0.03, gas = 0.03, costco_gas = 0.03 }
 annual_fee = 95
 
 [cards.prime_visa]
+# Checked 2026-11-02 against creditcards.chase.com/cash-back-credit-cards/
+# amazon-prime-rewards: 5% at Amazon.com, Whole Foods and Chase Travel; 2% at
+# gas stations, restaurants and local transit; 1% else. Drugstores were 2% on
+# the pre-2023 Prime Rewards Visa and are 1% now. No family separates transit.
 label = "Prime Visa"
 network = "visa"
 verified = true
+verified_on = "2026-11-02"
 requires_membership = false   # becomes the plain Amazon Visa without Prime
 default_rate = 0.01
-rates = { amazon = 0.05, whole_foods = 0.05, amazon_pharmacy = 0.05, gas = 0.02, restaurants = 0.02, drugstores = 0.02 }
+rates = { amazon = 0.05, whole_foods = 0.05, amazon_pharmacy = 0.05, gas = 0.02, restaurants = 0.02 }
 without_membership_rates = { amazon = 0.03, whole_foods = 0.03, amazon_pharmacy = 0.03 }
 
 [cards.walmart_card]
@@ -271,12 +276,17 @@ rates = { walmart_delivery = 0.05, walmart_online = 0.05, walmart_store = 0.05 }
 without_membership_rates = { walmart_delivery = 0.03, walmart_online = 0.03, walmart_store = 0.03 }
 
 [cards.costco_visa]
+# Read 2026-11-02 on citi.com/credit-cards/citi-costco-anywhere-visa-credit-card:
+# 5% on Costco gas, 4% on other gas and EV charging, the two sharing $7,000 a
+# year, then 1%; 3% restaurants and travel; 2% Costco; 1% else. verified stays
+# false until an instance's owner confirms it against their own card's terms.
 label = "Costco Anywhere Visa"
 network = "visa"
 verified = false
 requires_membership = true   # the card is closed when the membership lapses
 default_rate = 0.01
 rates = { costco_gas = 0.05, gas = 0.04, restaurants = 0.03, costco = 0.02 }
+caps = [{ families = ["costco_gas", "gas"], annual = 7000, then = 0.01 }]
 
 # No-fee cards below: each says when its terms were last read.
 
@@ -318,7 +328,8 @@ rates = { restaurants = 0.03, gas = 0.03, costco_gas = 0.03 }
 # Eligible: restaurants, gas, grocery stores, drugstores, streaming, transit,
 # select travel, home improvement, fitness, live entertainment. Superstores and
 # warehouse clubs don't count as grocery, so Walmart and Costco stay at 1%.
-# The model has no "one category, capped" term, so only groceries is listed.
+# The model has no "one category" term, so only groceries is listed; the
+# cap is its annual cap below, $500 x 12 cycles on evenly spread spend.
 # Groceries is the usual pick beside a 3x points card valued over ~1.5¢,
 # which already pays ~5% on restaurants and gas; list the one category your
 # spend makes top. A person-to-person grocery split filed as Groceries earns
@@ -334,6 +345,7 @@ verified_on = "2026-09-22"
 requires_membership = false
 default_rate = 0.01
 rates = { groceries = 0.05 }
+caps = [{ families = ["groceries"], annual = 6000, then = 0.01 }]
 
 [cards.freedom_flex]
 # Chase. Earns Ultimate Rewards

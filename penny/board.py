@@ -3127,10 +3127,11 @@ def render_card(s: State, key: str, v: View | None = None) -> str | None:
         return f"{mults[f]:g}x · {pct(rate)}" if points and f in mults else f"1x · {pct(rate)}" if points else pct(rate)
     if key in s.carried:
         sp = s.carried[key]
-        rows = [[escape(v.labels.get(f, f)), rate_cell(f), usd(x), usd(model.card_rate(card, f) * x)] for f, x in sorted(sp.items(), key=lambda kv: -kv[1]) if f in rated]
+        cc = model.capped(card, sp)  # past an annual cap a family earns the blended rate
+        rows = [[escape(v.labels.get(f, f)), rate_cell(f), usd(x), usd(model.card_rate(cc, f) * x)] for f, x in sorted(sp.items(), key=lambda kv: -kv[1]) if f in rated]
         rest = sum(x for f, x in sp.items() if f not in rated)
         rows.append(["Everything else it carries", rate_cell(cat.OTHER), usd(rest), usd(float(card.get("default_rate", 0.0)) * rest)])
-        earn = w.earn["base"] if w else sum(model.card_rate(card, f) * x for f, x in sp.items())
+        earn = w.earn["base"] if w else sum(model.card_rate(cc, f) * x for f, x in sp.items())
         left.append(_block("What it earns", _table(["Family", "Rate", "Spend / yr", "Earn"], rows, {1, 2, 3}, [f"Earn at {cents(float(card.get('default_rate', 0.0)))}" if points else "Earn", "", usd(sum(sp.values())), usd(earn)]),
                            note="On the spend on this card's own account numbers. Only families in rules.toml earn a bonus rate; anything else sits at the default."))
     elif r.detail or rated:

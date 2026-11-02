@@ -33,7 +33,7 @@ from pathlib import Path
 
 from . import load as ld
 from .load import Txn
-from .model import LEVELS, card_rate, scaled_card, spend_by_family
+from .model import LEVELS, capped, card_rate, scaled_card, spend_by_family
 
 # ---------------------------------------------------------------------------
 # Credit detection
@@ -75,15 +75,24 @@ def is_credit_row(t: Txn, spec: dict, pats: list[re.Pattern] | None = None) -> b
     return _hit(t, credit_patterns(spec) if pats is None else pats)
 
 
+def _on(year: int, m: int, dd: int) -> date:
+    """``m``-``dd`` in ``year``; a 02-29 anniversary falls on Feb 28 in a common year."""
+    try:
+        return date(year, m, dd)
+    except ValueError:
+        return date(year, m, 28)
+
+
 def year_start(d: date, mmdd: str) -> date:
     """Start of the anniversary year holding ``d``; years start on ``mmdd``."""
     m, dd = (int(x) for x in mmdd.split("-"))
-    s = date(d.year, m, dd)
-    return s if d >= s else date(d.year - 1, m, dd)
+    s = _on(d.year, m, dd)
+    return s if d >= s else _on(d.year - 1, m, dd)
 
 
-def _next_start(s: date) -> date:
-    return date(s.year + 1, s.month, s.day)
+def _next_start(s: date, mmdd: str) -> date:
+    m, dd = (int(x) for x in mmdd.split("-"))
+    return _on(s.year + 1, m, dd)
 
 
 @dataclass
@@ -117,7 +126,7 @@ def anniversary_years(txns: list[Txn], rules: dict, ckey: str, *, first: date, l
     years: list[AnnYear] = []
     s = year_start(first, mmdd)
     while s <= last:
-        n = _next_start(s)
+        n = _next_start(s, mmdd)
         y = AnnYear(s, n - timedelta(days=1), credits={k: 0.0 for k in credit_pats})
         if first > y.start:
             y.partial = f"data starts {first}"
@@ -206,8 +215,13 @@ def card_worth(rules: dict, assumptions: dict, spend: dict[str, float]) -> list[
         card = rules["cards"][ckey]
         pv = card_point_values(rules, assumptions, ckey)
         earn = {}
+        d = float(card.get("default_rate", 0.0))
         for lvl in LEVELS:
-            c = scaled_card(card, pv[lvl])
+            # Scale every rate by the ¢/pt's change from base. A pooled card's
+            # default_rate is already its multiple × the pool's ¢/pt (1.5x is
+            # 1.5¢ at 1¢), so re-valuing it *to* pv would collapse it to 1x.
+            f = pv[lvl] / pv["base"] if pv["base"] else 1.0
+            c = capped(scaled_card(card, d * f), spend)
             earn[lvl] = sum(card_rate(c, fam) * amt for fam, amt in spend.items())
         ben = {lvl: sum(float(b.get(lvl, 0.0)) for b in benefits(assumptions, ckey).values()) for lvl in LEVELS}
         out.append(Worth(ckey, card.get("label", ckey), earn, ben, float(card.get("annual_fee", 0.0)), "annual_fee" in card))

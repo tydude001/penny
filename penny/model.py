@@ -108,8 +108,31 @@ def card_rate(card: dict, family: str) -> float:
     return float(card.get("rates", {}).get(family, card.get("default_rate", 0.0)))
 
 
+def capped(card: dict, spend: dict[str, float]) -> dict:
+    """The card with each ``[[cards.X.caps]]`` applied to a year of ``spend``.
+    A cap pays the listed rates on the first ``annual`` dollars a year across
+    its ``families`` together, then ``then`` (the default rate when absent).
+    Spend is assumed even, so each family keeps the same share under the cap:
+    the rate becomes the blend of the two."""
+    caps = card.get("caps")
+    if not caps:
+        return card
+    rates = dict(card.get("rates", {}))
+    for c in caps:
+        fams = [f for f in c["families"] if spend.get(f, 0.0) > 0]
+        tot = sum(spend[f] for f in fams)
+        if not tot:
+            continue
+        k = min(1.0, float(c["annual"]) / tot)
+        after = float(c.get("then", card.get("default_rate", 0.0)))
+        for f in fams:
+            rates[f] = card_rate(card, f) * k + after * (1 - k)
+    return {**card, "rates": rates}
+
+
 def card_edge(card: dict, baseline: dict, spend: dict[str, float]) -> tuple[float, dict[str, float]]:
     """Total edge of the card over the baseline, and its per-family breakdown."""
+    card, baseline = capped(card, spend), capped(baseline, spend)
     per: dict[str, float] = {}
     for fam, amt in spend.items():
         d = card_rate(card, fam) - card_rate(baseline, fam)
@@ -124,13 +147,14 @@ def without_membership(card: dict, baseline: dict) -> dict:
         return baseline
     rates = dict(card.get("rates", {}))
     rates.update(card.get("without_membership_rates", {}))
-    return {"rates": rates, "default_rate": card.get("default_rate", 0.0)}
+    return {"rates": rates, "default_rate": card.get("default_rate", 0.0), **({"caps": card["caps"]} if "caps" in card else {})}
 
 
 def attributable_edge(card: dict, baseline: dict, spend: dict[str, float]) -> tuple[float, dict[str, float]]:
     """The part of the card's edge the membership causes: rate with membership
     minus the better of (same card without it, baseline), where positive."""
-    without = without_membership(card, baseline)
+    without = capped(without_membership(card, baseline), spend)
+    card, baseline = capped(card, spend), capped(baseline, spend)
     per: dict[str, float] = {}
     for fam, amt in spend.items():
         d = card_rate(card, fam) - max(card_rate(without, fam), card_rate(baseline, fam))
@@ -244,6 +268,8 @@ def scaled_card(card: dict, cpp: float) -> dict:
     out = dict(card)
     out["default_rate"] = d * f
     out["rates"] = {fam: float(r) * f for fam, r in card.get("rates", {}).items()}
+    if "caps" in card:
+        out["caps"] = [{**c, "then": float(c["then"]) * f} if "then" in c else c for c in card["caps"]]
     return out
 
 
@@ -297,6 +323,10 @@ def validate_rules(rules: dict, assumptions: dict | None = None) -> None:
             need(cards, "card", f"[cards.{ck}] points_of", c["points_of"])
         for i, q in enumerate(c.get("quarters", [])):
             need(fams, "family", f"[cards.{ck}] quarter {i + 1} families", q.get("families", []))
+        for i, cap in enumerate(c.get("caps", [])):
+            need(fams, "family", f"[cards.{ck}] cap {i + 1} families", cap.get("families", []))
+            if not isinstance(cap.get("annual"), (int, float)) or cap["annual"] <= 0:
+                errs.append(f"[cards.{ck}] cap {i + 1}: annual must be a positive dollar amount")
     for mk, m in rules.get("memberships", {}).items():
         need(fams, "family", f"[memberships.{mk}] families", m.get("families", []))
         if m.get("card"):
@@ -424,7 +454,10 @@ def observed_fees(txns: list[Txn], rules: dict) -> dict[str, list[Txn]]:
     the ``membership_fees`` family, so a costco.com order never reads as a fee."""
     found: dict[str, list[Txn]] = {}
     for mkey, rule in fee_rules(rules.get("memberships", {})).items():
-        hits = [t for t in txns if t.amount > 0 and is_fee(t, rule)]
+        # A categorised row is a fee only if the categoriser kept it one (a
+        # second $65.00 Costco trip in a year is a trip); an uncategorised row
+        # goes by the rule alone.
+        hits = [t for t in txns if t.amount > 0 and t.family in (None, FEES) and is_fee(t, rule)]
         if hits:
             found[mkey] = hits
     return found
