@@ -124,7 +124,10 @@ edge, each membership's verdict, open questions, and the raw transaction
 feed (with per-row and per-merchant hand overrides). Everything is derived
 fresh on each load from `rules.toml`, `assumptions.toml` and your imported
 feed; saving an answer on the board writes it into the TOML files in place
-(comments kept) — it never commits.
+(comments kept) — it never commits. Every save has a CLI twin through the
+same checks: `penny set assumptions budget.groceries 600` for a Record
+answer, `penny override ID --family F | --category C | --clear [--merchant]`
+for a hand override.
 
 It binds `127.0.0.1` by default. `--tailscale` binds your Tailscale IPv4
 instead, for reaching it from another device on your own tailnet. `--host`

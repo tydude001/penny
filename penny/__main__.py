@@ -315,16 +315,53 @@ def cmd_override(args):
             if needle in t.match_text:
                 print(f"{t.txn_id}  {t.date}  {t.amount:>9.2f}  {(t.description or t.name)[:32]:32}  {t.family} / {t.budget_category}")
         return
-    if not args.id or not (args.family or args.category):
-        sys.exit("penny override --find TEXT, or penny override ID --family F and/or --category C")
+    if not args.id or not (args.family or args.category or args.clear) or (args.clear and (args.family or args.category)):
+        sys.exit("penny override --find TEXT, or penny override ID --family F and/or --category C, or ID --clear; "
+                 "--merchant for every row from that row's merchant")
     try:
         cat.check_override(txns, rules, args.id, args.family, args.category)
     except ValueError as e:
         sys.exit(f"{e}; find it with --find" if "no spend row" in str(e) else str(e))
     if args.category and args.category not in {t.budget_category for t in txns}:
         print(f"note: {args.category!r} is a new category")
-    entry = cat.save_override(args.home / feed.OVERRIDES, args.id, args.family, args.category)
-    print(f"{args.id}: {entry}")
+    # The board's Transactions page writes the same two files the same way.
+    if args.merchant:
+        path, key = args.home / feed.MERCHANTS, cat.merchant_of(next(t for t in txns if t.txn_id == args.id)).lower()
+    else:
+        path, key = args.home / feed.OVERRIDES, args.id
+    before = cat.load_overrides(path).get(key, {})
+    entry = cat.save_override(path, key, args.family, args.category, clear=args.clear)
+    if entry != before:
+        from datetime import datetime
+
+        board._audit(board.Config(args.home, args.rules, args.assumptions),
+                     [{"when": datetime.now().astimezone().isoformat(timespec="seconds"), "file": path.name, "section": key,
+                       "key": "override", "before": before, "after": entry, "note": "penny override"}])
+    print(f"{key}: {entry or 'cleared, back to the rules'}")
+
+
+def _value(text: str):
+    """A ``penny set`` value: a TOML/JSON number or true/false, else text."""
+    try:
+        v = json.loads(text)
+    except ValueError:
+        return text
+    return v if isinstance(v, (bool, int, float, str)) else text
+
+
+def cmd_set(args):
+    """One Record write, through the board's allowlist and audit: the board never
+    writes anything this can't."""
+    section, _, key = args.where.rpartition(".")
+    if not section:
+        sys.exit("penny set FILE SECTION.KEY VALUE, e.g. penny set assumptions budget.groceries 600")
+    w = {"file": args.file, "section": section, "key": key, "subkey": args.subkey, "value": _value(args.value), "note": args.note}
+    try:
+        res = board.record(board.Config(args.home, args.rules, args.assumptions), w)
+    except board.Refused as e:
+        sys.exit(str(e))
+    for r in res["recorded"] or [{"file": args.file, "section": section, "key": key, "after": "unchanged"}]:
+        print(f"{r['file']} [{r['section']}] {r['key']} = {r['after']}")
 
 
 def cmd_init(args):
@@ -384,8 +421,17 @@ def main(argv=None):
     s.add_argument("--find", metavar="TEXT", help="list spend rows whose merchant text contains TEXT, with their ids")
     s.add_argument("--family")
     s.add_argument("--category")
+    s.add_argument("--clear", action="store_true", help="drop the hand-set family and category, back to the rules")
+    s.add_argument("--merchant", action="store_true", help="for every row from this row's merchant (data/merchants.json); a row's own beats it")
     s.add_argument("--env", choices=["sandbox", "production"], default="production")
     s.set_defaults(fn=cmd_override)
+    s = sub.add_parser("set", help="one Record write into rules.toml or assumptions.toml, as the board saves it: allowlisted, audited")
+    s.add_argument("file", choices=["rules", "assumptions"])
+    s.add_argument("where", metavar="SECTION.KEY", help="e.g. budget.groceries, cards.sapphire_preferred.default_rate")
+    s.add_argument("value", help="a number, true/false, or text")
+    s.add_argument("--subkey", help="a key inside an inline table, e.g. cards.sapphire_preferred.rates --subkey restaurants")
+    s.add_argument("--note", help="why, kept in the audit line")
+    s.set_defaults(fn=cmd_set)
     s = sub.add_parser("walmart", help="rank Walmart line items from a scripts/walmart-orders-capture.js file")
     s.add_argument("capture")
     s.add_argument("--top", type=int, default=30)
