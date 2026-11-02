@@ -64,9 +64,13 @@ out, and `--negate` flips a file that writes purchases negative:
 uv run penny import csv card.csv --date "Posting Date" --amount Amount --description Details --last4 4242 --negate
 ```
 
-Imports land in `data/imports/`, one file per source (importing the same file
-again replaces it), and `report`, `categories` and the board read them with no
-further flags.
+Imports land in `data/imports/`, one file per source, and `report`,
+`categories` and the board read them with no further flags. Importing the
+same file again replaces it, unless that would drop rows it held (`--as NAME`
+imports beside it, `--replace` forces it); a row another imported file
+already holds is skipped, so overlapping exports count it once. Comma-decimal
+amounts and day-first dates are refused rather than misread
+(`--date-format %d/%m/%Y` reads the latter).
 
 Every path penny reads or writes resolves against an **instance directory**:
 the `--home` flag, else the `PENNY_HOME` environment variable, else `./home`
