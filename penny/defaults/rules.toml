@@ -410,14 +410,12 @@ fee_patterns = ['annual membership fee']
 # Reserve only. For a card product-changed to the Preferred, `until` (the
 # change date, set in your instance) keeps it out of the board's projected
 # year; the report still prints it for past years.
-until = "2026-09-14"
 label = "Travel credit"
 patterns = ['\btravel credit']
 face = 300
 
 [card_credits.sapphire_preferred.credits.edit]
 # Reserve only. $500/yr in two $250 bookings. `until` as above.
-until = "2026-09-14"
 label = "The Edit"
 patterns = ['\bthe edit\b']
 face = 500
