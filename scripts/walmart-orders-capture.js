@@ -168,6 +168,14 @@
     }
     if (!tmpl) {
       console.warn("no second page of the order list captured yet -- scroll to the bottom and load the next page, then replay again");
+      // What was seen, so a page-two request this missed can be told apart
+      // from one never made. Variable names and short values only; no headers.
+      const all = requests.filter(r => /\/PurchaseHistory/.test(r.url));
+      console.log(`order-list requests seen: ${all.length} (${history.length} with readable variables); cursors handed out: ${[...cursors].join(", ") || "none"}`);
+      for (const r of all) {
+        const v = varsOf(r);
+        console.log(`  ${r.method} ${v ? Object.entries(v).map(([k, x]) => `${k}=${JSON.stringify(x)?.slice(0, 40)}`).join("  ") : "(no variables found)"}`);
+      }
       return;
     }
 
