@@ -14,6 +14,7 @@ run ``penny inspect`` on a real export to confirm which way it goes.
 from __future__ import annotations
 
 import csv
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import date
@@ -54,9 +55,9 @@ class Txn:
         return " | ".join(x for x in (self.custom_name, self.name, self.description) if x).lower()
 
 
-def _parse_date(s: str) -> date:
+def _parse_date(s: str, date_format: str | None = None) -> date:
     s = s.strip()
-    for fmt in DATE_FORMATS:
+    for fmt in (date_format,) if date_format else DATE_FORMATS:
         try:
             return date(*time.strptime(s, fmt)[:3])
         except ValueError:
@@ -64,8 +65,17 @@ def _parse_date(s: str) -> date:
     raise ValueError(f"unrecognised date: {s!r}")
 
 
+# Thousands grouped by commas, as a US file writes them: 1,234.56 but never 1.234,56.
+US_GROUPED = re.compile(r"^[-+(]?\$?[-+]?\d{1,3}(,\d{3})+(\.\d*)?\)?$")
+
+
 def _parse_amount(s: str) -> float:
-    s = s.strip().replace("$", "").replace(",", "")
+    s = s.strip()
+    if "," in s and not US_GROUPED.match(s.replace(" ", "")):
+        # 1.234,56 or 12,50: a comma decimal, which dropping the comma would
+        # read as 1.23456 or 1250. Refuse rather than guess.
+        raise ValueError(f"amount {s!r} looks like a comma decimal; convert the file to 1234.56 style first")
+    s = s.replace("$", "").replace(",", "")
     if s.startswith("(") and s.endswith(")"):
         s = "-" + s[1:-1]
     return float(s)
