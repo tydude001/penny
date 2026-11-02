@@ -13,10 +13,10 @@
 //      date filter at its default, so the list runs back as far as it can.
 //   2. DevTools (F12) > Console. If Chrome asks, type `allow pasting`.
 //   3. Paste this whole file, press Enter. It prints "capturing".
-//   4. Scroll to the bottom of the order list and load the next page once, then
-//      open one order's details. Each captured response prints a line. That
-//      teaches the replay both requests' shape. If you have in-store orders
-//      too, open one of those as well.
+//   4. Open one order's details. Each captured response prints a line. That
+//      teaches the replay the order request's shape; the list's own first
+//      page teaches it the paging. If you have in-store orders too, open one
+//      of those as well.
 //   5. Run  __wmReplay("2024-11-01")  . It pages the list back to that date,
 //      then opens every order listed from then on. One request at a time, so
 //      two years takes a few minutes; it prints progress.
@@ -152,41 +152,55 @@
       console.warn('usage: __wmReplay("2024-11-01"[, "2026-10-31"])'); return;
     }
 
-    // Seed the list from what the page already loaded, and learn the cursor
-    // variable: the one whose value is a cursor an earlier page handed out.
+    // Seed the list from what the page already loaded, and find the cursor
+    // variable: a string named *cursor* anywhere in the variables (Walmart
+    // nests it, as input.cursor), or one whose value an earlier page handed
+    // out. Its path is kept, so it can be set again on a copy.
     const cursors = new Set();
     for (const h of hits) {
       const p = h.url.includes("/PurchaseHistory") && pageOf(h.body);
       if (p) { list(p.orders); if (p.next) cursors.add(p.next); }
     }
+    const cursorPath = (o, path = []) => {
+      if (!o || typeof o !== "object") return null;
+      for (const [k, v] of Object.entries(o)) {
+        if (typeof v === "string" && (/cursor/i.test(k) || cursors.has(v))) return [...path, k];
+        const deeper = cursorPath(v, [...path, k]);
+        if (deeper) return deeper;
+      }
+      return null;
+    };
+    const setAt = (o, path, v) => { let x = o; for (const k of path.slice(0, -1)) x = x[k]; x[path[path.length - 1]] = v; };
+    const getAt = (o, path) => path.reduce((x, k) => x?.[k], o);
+
     const history = requests.filter(r => /\/PurchaseHistory/.test(r.url) && varsOf(r));
-    let tmpl = null, key = null;
+    let tmpl = null, path = null;
     for (const r of history) {
-      const vars = varsOf(r);
-      const k = Object.keys(vars).find(k => typeof vars[k] === "string" && (cursors.has(vars[k]) || /cursor/i.test(k) && vars[k]));
-      if (k) { tmpl = r; key = k; }
+      const p = cursorPath(varsOf(r));
+      if (p) { tmpl = r; path = p; }
     }
     if (!tmpl) {
-      console.warn("no second page of the order list captured yet -- scroll to the bottom and load the next page, then replay again");
-      // What was seen, so a page-two request this missed can be told apart
-      // from one never made. Variable names and short values only; no headers.
+      console.warn("found no page cursor in the order list's requests -- send Claude the lines below");
+      // Variable names and short values only; no headers.
       const all = requests.filter(r => /\/PurchaseHistory/.test(r.url));
       console.log(`order-list requests seen: ${all.length} (${history.length} with readable variables); cursors handed out: ${[...cursors].join(", ") || "none"}`);
       for (const r of all) {
         const v = varsOf(r);
-        console.log(`  ${r.method} ${v ? Object.entries(v).map(([k, x]) => `${k}=${JSON.stringify(x)?.slice(0, 40)}`).join("  ") : "(no variables found)"}`);
+        console.log(`  ${r.method} ${v ? Object.entries(v).map(([k, x]) => `${k}=${JSON.stringify(x)?.slice(0, 80)}`).join("  ") : "(no variables found)"}`);
       }
       return;
     }
 
-    // Page back from the newest order until the list passes `from`.
+    // Page back from the newest order until the list passes `from`. The
+    // first request re-sends the earliest list call as the page made it
+    // (page one, whatever cursor it carried); the rest set the cursor each
+    // page hands out.
+    const firstReq = history.find(r => cursorPath(varsOf(r))) || tmpl;
     let cursor = null, pages = 0;
-    const first = history.find(r => !varsOf(r)[key]);
     const asked = new Set();
     while (pages < 300) {
-      const vars = clone(varsOf(tmpl));
-      if (cursor) vars[key] = cursor; else if (!first) vars[key] = varsOf(tmpl)[key];
-      const req = cursor || !first ? withVars(tmpl, vars) : first;
+      let req = firstReq;
+      if (cursor) { const vars = clone(varsOf(tmpl)); setAt(vars, path, cursor); req = withVars(tmpl, vars); }
       let page;
       try { page = pageOf(await send(req)); } catch (e) { console.warn(`page ${pages + 1} failed: ${e.message}`); break; }
       if (!page) { console.warn(`page ${pages + 1}: no order list in the response`); break; }
@@ -194,7 +208,7 @@
       list(page.orders);
       const dates = page.orders.map(o => String(o.orderDate || "").slice(0, 10)).filter(Boolean).sort();
       console.log(`page ${pages}: ${page.orders.length} orders, ${dates[0] || "?"} .. ${dates[dates.length - 1] || "?"}`);
-      if (!page.next || asked.has(page.next) || (dates[0] && dates[0] < start)) break;
+      if (!page.next || asked.has(page.next) || page.next === getAt(varsOf(req), path) || (dates[0] && dates[0] < start)) break;
       asked.add(page.next); cursor = page.next;
       await pause(500);
     }
@@ -238,5 +252,5 @@
     console.log(`wrote ${hits.length} responses to ${a.download}`);
   };
 
-  console.log("capturing. load a second page of orders and open one, then __wmReplay(\"2024-11-01\") and/or __wmDump()");
+  console.log("capturing. open one order, then __wmReplay(\"2024-11-01\") and/or __wmDump()");
 })();
