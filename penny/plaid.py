@@ -159,8 +159,12 @@ class Store:
     changes; the lock is never held across a network call.
     """
 
-    def __init__(self, root: Path, env: str):
+    def __init__(self, root: Path, env: str, *, create: bool = True):
+        """``create=False`` is for readers: a missing store reads as empty and
+        nothing is made, so ``penny report --home typo`` doesn't leave a tree."""
         self.dir = root / "data" / "plaid" / env
+        if not create:
+            return
         self.dir.mkdir(parents=True, exist_ok=True)
         os.chmod(self.dir.parent, 0o700)
         os.chmod(self.dir, 0o700)

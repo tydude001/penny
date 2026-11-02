@@ -48,6 +48,7 @@
     try { body = JSON.parse(text); } catch { return; }
     hits.push({ url: String(url).split("?")[0], at: new Date().toISOString(), body });
     console.log(`captured #${hits.length}  ${(text.length / 1024) | 0} KB  ${String(url).split("?")[0]}`);
+    return body;
   };
 
   const note = (url, method, headers, body) => {
@@ -109,11 +110,18 @@
     return out;
   };
 
-  const send = async (req, body) => {
+  // needOrder: a detail open, which must come back with a receipt in it. A
+  // search over months with no trips is small and has none, and is fine.
+  const send = async (req, body, needOrder = false) => {
     const res = await origFetch(req.url, { method: req.method, headers: req.headers, body, credentials: "include" });
     const text = await res.text();
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    keep(req.url, text);
+    // A signed-out session still answers 200, with GraphQL errors and no data:
+    // count that as a failure, not an order opened.
+    let parsed;
+    try { parsed = JSON.parse(text); } catch { throw new Error("response was not JSON -- signed out?"); }
+    if (parsed.errors && !parsed.data) throw new Error(`GraphQL: ${String(parsed.errors[0]?.message || "error").slice(0, 120)}`);
+    if (!keep(req.url, text) && needOrder) throw new Error("response did not look like receipt data");
     return text;
   };
 
@@ -123,7 +131,8 @@
   // online order numbers.
   const idsIn = text => {
     const ids = new Set();
-    for (const m of text.matchAll(/"(transactionBarcode|orderNumber)"\s*:\s*"?([\w-]+)"?/g)) ids.add(m[2]);
+    // Quoted ids, or bare numbers: never a bare null.
+    for (const m of text.matchAll(/"(transactionBarcode|orderNumber)"\s*:\s*(?:"([\w-]+)"|(\d+))/g)) ids.add(m[2] || m[3]);
     return ids;
   };
 
@@ -163,13 +172,13 @@
     const tmpl = { long: null, short: null };
     for (const r of requests) {
       const m = r.body.match(/"(barcode|transactionBarcode|orderNumbers?)"\s*:\s*\[?\s*"?([\w-]+)"?/i);
-      if (m) tmpl[m[2].length >= 20 ? "long" : "short"] = { req: r, old: m[2] };
+      if (m && m[2] !== "null") tmpl[m[2].length >= 20 ? "long" : "short"] = { req: r, old: m[2] };
     }
     let n = 0;
     for (const id of found) {
       const t = tmpl[id.length >= 20 ? "long" : "short"];
       if (!t) continue;
-      try { await send(t.req, t.req.body.split(t.old).join(id)); n++; } catch (e) { console.warn(`open ${id} failed: ${e.message}`); }
+      try { await send(t.req, t.req.body.split(t.old).join(id), true); n++; } catch (e) { console.warn(`open ${id} failed: ${e.message}`); }
       if (n % 10 === 0) console.log(`opened ${n} of ${found.size}`);
       await pause(400);
     }

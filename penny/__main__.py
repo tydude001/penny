@@ -478,7 +478,13 @@ def main(argv=None):
     args.home = home.resolve(args.home)
     args.rules = Path(args.rules) if args.rules else args.home / "rules.toml"
     args.assumptions = Path(args.assumptions) if args.assumptions else args.home / "assumptions.toml"
+    if args.fn not in NO_INSTANCE and not args.home.is_dir():
+        sys.exit(f"no penny instance at {args.home}: `penny init` makes one there, or pass --home / set PENNY_HOME")
     args.fn(args)
+
+
+# Commands that run without an instance: they make one, or read only the file given.
+NO_INSTANCE = {cmd_init, cmd_demo, cmd_inspect, cmd_walmart, cmd_costco}
 
 
 if __name__ == "__main__":

@@ -195,4 +195,4 @@ def load(root: Path, today: date, sts: list[statements.Statement] | None = None,
         return None
     if sts is None:
         sts, _ = statements.load_dir(root / "data" / "statements", root / "data" / "apple")
-    return build(Store(root, env), sts, apple.load(root / "data" / "apple"), today, lacks_rewards)
+    return build(Store(root, env, create=False), sts, apple.load(root / "data" / "apple"), today, lacks_rewards)

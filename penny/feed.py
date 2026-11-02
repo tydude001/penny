@@ -176,7 +176,9 @@ def load(root: Path, env: str = "production", *, spend_only: bool = True) -> lis
     (``data/imports/``), oldest first.
     ``spend_only`` drops transfers, card payments and income, as the Rocket
     Money loader's ``exclude_categories`` did."""
-    txns = from_plaid(plaid.Store(root, env)) + from_apple(root / "data" / "apple") + csvimport.load(root / csvimport.IMPORTS)
+    if not Path(root).is_dir():
+        raise FileNotFoundError(f"no penny instance at {root}: penny init makes one, or pass --home")
+    txns = from_plaid(plaid.Store(root, env, create=False)) + from_apple(root / "data" / "apple") + csvimport.load(root / csvimport.IMPORTS)
     pair_wallets(txns)
     if spend_only:
         txns = [t for t in txns if is_spend(t)]

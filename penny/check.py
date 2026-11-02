@@ -302,7 +302,7 @@ class Checks:
 def run_all(root: Path, rules: dict, env: str = "production") -> Checks:
     """What ``penny check`` runs: every statement PDF, the Apple Card CSVs and the Plaid store."""
     sts, errors = statements.load_dir(root / "data" / "statements", root / "data" / "apple")
-    return Checks(run(Store(root, env), sts, apple.load(root / "data" / "apple"), reward_rates(rules)), errors, sts)
+    return Checks(run(Store(root, env, create=False), sts, apple.load(root / "data" / "apple"), reward_rates(rules)), errors, sts)
 
 
 def apple_due(sts: list[Statement], today: date) -> tuple[date, date, bool] | None:

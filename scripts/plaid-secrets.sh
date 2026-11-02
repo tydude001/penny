@@ -1,11 +1,19 @@
 #!/usr/bin/env bash
 # Prompt for Plaid keys and write them to data/plaid.env in the instance
-# ($PENNY_HOME, else ./home; git-ignored, mode 600).
+# (--home DIR, else $PENNY_HOME, else ./home, relative to where you run it,
+# exactly as penny resolves it; git-ignored, mode 600).
 # Secrets are read without echo, so they never show on screen or in shell history.
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
-out=${PENNY_HOME:-home}/data/plaid.env
+home=${PENNY_HOME:-home}
+if [[ ${1:-} == --home ]]; then
+    home=${2:?--home needs a directory}
+elif [[ ${1:-} == --home=* ]]; then
+    home=${1#--home=}
+elif [[ $# -gt 0 ]]; then
+    echo "usage: $0 [--home DIR]" >&2; exit 2
+fi
+out=$home/data/plaid.env
 
 if [[ -e $out ]]; then
     read -rp "$out exists. Overwrite? [y/N] " yn
@@ -30,9 +38,17 @@ ask production "Production secret"  1
 
 umask 077
 mkdir -p "$(dirname "$out")"
+# A new 0600 file renamed over the old, so the secrets are never in a file
+# someone else can read, even one an earlier run left 0644.
+tmp=$(mktemp "$(dirname "$out")/.plaid.env.XXXXXX")
+trap 'rm -f "$tmp"' EXIT
 printf 'PLAID_CLIENT_ID=%s\nPLAID_SECRET_SANDBOX=%s\nPLAID_SECRET_PRODUCTION=%s\n' \
-    "$client_id" "$sandbox" "$production" > "$out"
-chmod 600 "$out"
+    "$client_id" "$sandbox" "$production" > "$tmp"
+chmod 600 "$tmp"
+mv -f "$tmp" "$out"
+trap - EXIT
 
 echo "Wrote $out (mode 600): client_id ${#client_id} chars, sandbox secret ${#sandbox} chars, production secret ${#production} chars."
-git check-ignore -q "$out" && echo "git ignores it." || echo "WARNING: git does not ignore $out"
+if git -C "$(dirname "$out")" rev-parse --git-dir >/dev/null 2>&1; then
+    git -C "$(dirname "$out")" check-ignore -q "$(basename "$out")" && echo "git ignores it." || echo "WARNING: git does not ignore $out"
+fi

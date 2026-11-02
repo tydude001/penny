@@ -114,3 +114,18 @@ def test_an_override_save_waits_for_one_already_running(tmp_path):
         cat.fsio.write_atomic(p, json.dumps({"a": {"family": "y"}}))
     t.join(5)
     assert json.loads(p.read_text()) == {"a": {"family": "y"}, "b": {"family": "x"}}
+
+
+def test_a_read_against_a_missing_instance_says_so_and_makes_nothing(tmp_path):
+    from penny import __main__ as cli
+
+    missing = tmp_path / "typo"
+    with pytest.raises(SystemExit, match="no penny instance at"):
+        cli.main(["--home", str(missing), "report"])
+    with pytest.raises(FileNotFoundError):
+        from penny import feed
+
+        feed.load(missing)
+    assert not missing.exists()
+    plaid.Store(tmp_path / "empty", "production", create=False).items()
+    assert not (tmp_path / "empty").exists()
