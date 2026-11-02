@@ -48,6 +48,11 @@ class Window:
         return self.asked > self.days
 
     @property
+    def short(self) -> bool:
+        """Under a year, for whatever reason: every annual figure is a scale-up."""
+        return self.days < 365
+
+    @property
     def days(self) -> int:
         return (self.end - self.start).days + 1
 
@@ -57,17 +62,22 @@ class Window:
 
 
 def pick_window(txns: list[Txn], *, year: int | None = None, days: int | None = None) -> Window:
-    if not txns:
-        raise ValueError("no transactions")
     """The window asked for, clamped to the dates the data covers: a year or
     365 days scaled by ×1.00 over nine months of rows would read 25% low."""
+    if not txns:
+        raise ValueError("no transactions")
+    if days is not None and days < 1:
+        raise ValueError(f"--days must be at least 1, not {days}")
     first, last = min(t.date for t in txns), max(t.date for t in txns)
     if year is not None:
         start, end = date(year, 1, 1), date(year, 12, 31)
     else:
         start, end = last - timedelta(days=(days or 365) - 1), last
     asked = (end - start).days + 1
-    return Window(max(start, first), min(end, last), asked)
+    lo, hi = max(start, first), min(end, last)
+    if hi < lo:
+        raise ValueError(f"no transactions in {year if year is not None else 'that window'}: the data runs {first} → {last}")
+    return Window(lo, hi, asked)
 
 
 def in_window(txns: list[Txn], w: Window) -> list[Txn]:

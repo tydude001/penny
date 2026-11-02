@@ -57,6 +57,13 @@ def _prep(args):
     return rules, txns, fams, labels
 
 
+def _window(txns, **kw):
+    try:
+        return model.pick_window(txns, **kw)
+    except ValueError as e:
+        sys.exit(str(e))
+
+
 def cmd_inspect(args):
     info = ld.inspect(args.export)
     print(f"columns: {info['columns']}")
@@ -69,14 +76,14 @@ def cmd_inspect(args):
 
 def cmd_unmatched(args):
     _, txns, _, _ = _prep(args)
-    w = model.pick_window(txns, year=args.year, days=args.days)
+    w = _window(txns, year=args.year, days=args.days)
     rows = cat.unmatched(model.in_window(txns, w), top=args.top)
     print(report.table(["merchant", "spend", "n"], [[n, report.money(s), str(c)] for n, s, c in rows]))
 
 
 def cmd_families(args):
     _, txns, _, labels = _prep(args)
-    w = model.pick_window(txns, year=args.year, days=args.days)
+    w = _window(txns, year=args.year, days=args.days)
     tx = model.in_window(txns, w)
     by: dict[str, dict[str, float]] = {}
     for t in tx:
@@ -93,7 +100,7 @@ def cmd_report(args):
     rules, txns, _fams, labels = _prep(args)
     assumptions = _toml(args.assumptions)
     model.validate_rules(rules, assumptions)
-    w = model.pick_window(txns, year=args.year, days=args.days)
+    w = _window(txns, year=args.year, days=args.days)
     tx = model.in_window(txns, w)
     spend = model.spend_by_family(tx)
     verdicts = model.evaluate(rules, assumptions, spend, w.annualize)
@@ -253,8 +260,14 @@ def cmd_compare(args):
             sys.exit("no Rocket Money rows imported; penny import csv EXPORT --preset rocket, or pass the export")
     # The feed side is Plaid and the Apple Card only, never an imported CSV.
     fd = [t for t in feed.labelled(args.home, rules, args.env) if t.source in ("plaid", "apple_csv")]
-    end = min(rm[-1].date, fd[-1].date)
-    w = model.Window(end - model.timedelta(days=args.days - 1), end)
+    if not fd:
+        sys.exit("no Plaid or Apple Card rows on the feed to compare against")
+    # Both sides must cover the window, or one reads short where the other has rows.
+    end = min(max(t.date for t in rm), max(t.date for t in fd))
+    start = max(end - model.timedelta(days=args.days - 1), min(t.date for t in rm), min(t.date for t in fd))
+    if end < start:
+        sys.exit("the two sources don't overlap")
+    w = model.Window(start, end)
     a, b = model.in_window(rm, w), model.in_window(fd, w)
     print(f"{w.start} → {w.end}: Rocket Money {len(a)} rows, feed {len(b)} rows (spend rows only)")
 
@@ -273,7 +286,7 @@ def cmd_categories(args):
     """Spend by budget category on the feed, and what is left uncategorised."""
     rules = model.resolve_points(_rules(args))
     txns = feed.labelled(args.home, rules, args.env)
-    w = model.pick_window(txns, days=args.days)
+    w = _window(txns, days=args.days)
     tx = model.in_window(txns, w)
     by: dict[str, float] = {}
     for t in tx:

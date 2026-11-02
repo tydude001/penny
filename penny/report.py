@@ -210,6 +210,7 @@ def render(
     parts = [
         f"Window {w.start} → {w.end} ({w.days} days, ×{a:.2f} to annualise), {n_txns} transactions",
         *([f"Partial: the data covers {w.days} of the {w.asked} days asked for, so every annual figure is a ×{a:.2f} scale-up, not a measurement."] if w.partial else []),
+        *([f"Short: a {w.days}-day window is under a year, so every annual figure is a ×{a:.2f} scale-up, not a measurement."] if w.short and not w.partial else []),
         "",
         "Spend by family",
         spend_table(spend_window, a, families),

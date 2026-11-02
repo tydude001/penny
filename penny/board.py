@@ -2440,7 +2440,6 @@ def render_costco(s: State) -> str:
 
 def render_rail(s: State) -> str:
     w = s.window
-    covered = (w.end - max(s.first, w.start)).days + 1
     total = sum(s.spend.values()) or 1.0
     outside = s.spend.get(cat.OTHER, 0.0) / total
     parts = [
@@ -2449,11 +2448,11 @@ def render_rail(s: State) -> str:
         f"<dt>window</dt><dd>{w.start} → {w.end}</dd>",
         f"<dt>transactions</dt><dd>{s.n_txns:,}</dd>",
     ]
-    if covered < w.days:
-        parts.append(f"<dt>covers</dt><dd class=warn>{covered} of {w.days} days</dd>")
+    if w.short:
+        parts.append(f"<dt>covers</dt><dd class=warn>{w.days} of 365 days</dd>")
     parts.append(f"<dt>outside the families</dt><dd>{outside:.0%} of spend</dd></dl>")
-    if covered < w.days:
-        parts.append("<p class=fine>Less than a year of data: spend is short, not scaled up.</p>")
+    if w.short:
+        parts.append(f"<p class=fine>Less than a year of data: every annual figure is this window ×{w.annualize:.2f}, a guess, not a measurement.</p>")
     parts.append("</div>")
     parts.append(render_walmart(s))
     parts.append(render_costco(s))
