@@ -24,6 +24,7 @@ from . import (
     model,
     plaid,
     report,
+    tomledit,
     walmart,
 )
 from . import categorize as cat
@@ -361,7 +362,8 @@ def cmd_set(args):
     except board.Refused as e:
         sys.exit(str(e))
     for r in res["recorded"] or [{"file": args.file, "section": section, "key": key, "after": "unchanged"}]:
-        print(f"{r['file']} [{r['section']}] {r['key']} = {r['after']}")
+        after = r["after"] if r["after"] == "unchanged" else tomledit.fmt(r["after"])
+        print(f"{r['file']} [{r['section']}] {r['key']} = {after}")
 
 
 def cmd_init(args):

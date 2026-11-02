@@ -59,3 +59,8 @@ def test_set_writes_through_the_boards_allowlist(inst, capsys):
 def test_set_refuses_what_the_board_refuses(inst):
     with pytest.raises(SystemExit, match="Allowed|refuse|not|only"):
         _cli(inst, "set", "rules", "held.baseline_card", "prime_visa")
+
+
+def test_set_prints_the_value_as_toml_writes_it(inst, capsys):
+    _cli(inst, "set", "assumptions", "prime.rxpass.note", "priced at the pharmacy")
+    assert '[prime.rxpass] note = "Recorded' in capsys.readouterr().out
