@@ -483,8 +483,9 @@ def main(argv=None):
     args.fn(args)
 
 
-# Commands that run without an instance: they make one, or read only the file given.
-NO_INSTANCE = {cmd_init, cmd_demo, cmd_inspect, cmd_walmart, cmd_costco}
+# Commands that run without an instance: they make one, read only the file
+# given, or (plaid) say for themselves which file is missing.
+NO_INSTANCE = {cmd_init, cmd_demo, cmd_inspect, cmd_walmart, cmd_costco, cmd_plaid}
 
 
 if __name__ == "__main__":
