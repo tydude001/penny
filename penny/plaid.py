@@ -13,6 +13,7 @@ import http.client
 import json
 import os
 import secrets
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -169,16 +170,23 @@ class Store:
         use and kept in data/plaid/client-user-id, shared by every env. Plaid
         only reads it when a Link token is made."""
         path = self.dir.parent / USER_ID_FILE
+        if path.exists() and (uid := path.read_text().strip()):
+            return uid
+        # Written whole to a temp file, then linked into place only if no id is
+        # there yet: a crash leaves no id or the whole id, never an empty file,
+        # and of two processes racing, both return the one that won.
+        tmp = path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(4)}")
+        fsio.write_atomic(tmp, secrets.token_hex(16) + "\n", mode=0o600)
         try:
-            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            if path.exists():  # empty: left by a crash before this fix
+                path.unlink()
+            os.link(tmp, path)
         except FileExistsError:
-            return path.read_text().strip()
-        uid = secrets.token_hex(16)
-        with os.fdopen(fd, "w") as f:
-            f.write(uid + "\n")
-            f.flush()
-            os.fsync(f.fileno())
-        return uid
+            pass
+        finally:
+            tmp.unlink()
+        fsio.fsync_dir(path.parent)
+        return path.read_text().strip()
 
     @property
     def env(self) -> str:
@@ -264,15 +272,14 @@ class Store:
         self._write(self.dir / f"{item_id}.json", ledger)
 
     def append_balances(self, lines: list[dict]) -> None:
-        fd = os.open(self.dir / "balances.jsonl", os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-        with os.fdopen(fd, "a") as f:
-            f.writelines(json.dumps(line) + "\n" for line in lines)
-            f.flush()
-            os.fsync(f.fileno())
+        fsio.append_lines(self.dir / "balances.jsonl", [json.dumps(line) for line in lines])
 
     def balances(self) -> list[dict]:
-        path = self.dir / "balances.jsonl"
-        return [json.loads(line) for line in path.read_text().splitlines() if line] if path.exists() else []
+        # A line torn by a crash mid-append is one lost snapshot, not every read failing.
+        rows, bad = fsio.read_lines(self.dir / "balances.jsonl", json.loads)
+        if bad:
+            print(f"warning: {bad} torn line(s) in {self.dir / 'balances.jsonl'} skipped", file=sys.stderr)
+        return rows
 
     def last_sync(self) -> dict | None:
         return self._read(self.dir / "last-sync.json", None)

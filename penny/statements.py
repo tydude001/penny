@@ -58,9 +58,18 @@ def money(s: str) -> float:
     return round(float(s), 2)
 
 
+PDFTOTEXT_TIMEOUT = 60  # seconds; a statement takes well under one
+
+
 def pdf_text(path: Path) -> str:
-    return subprocess.run(["pdftotext", "-layout", str(path), "-"], check=True,
-                          capture_output=True, text=True).stdout
+    # Absolute, so a file named "-x.pdf" can't read as an option; a timeout, so
+    # a malformed PDF can't hang the caller (the board's upload thread).
+    try:
+        return subprocess.run(["pdftotext", "-layout", str(Path(path).resolve()), "-"], check=True,
+                              capture_output=True, text=True, errors="replace",
+                              timeout=PDFTOTEXT_TIMEOUT).stdout
+    except subprocess.TimeoutExpired:
+        raise ParseError(f"pdftotext took over {PDFTOTEXT_TIMEOUT}s; is it a real statement?") from None
 
 
 def _mdy(s: str) -> date:

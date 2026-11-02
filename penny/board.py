@@ -46,6 +46,7 @@ from . import (
     check,
     costco,
     feed,
+    fsio,
     home,
     model,
     networth,
@@ -67,6 +68,10 @@ WASH = 10.0  # a tier whose best alternative is within this of the held one is s
 PROMPTS = ("ask", "how", "low_if", "high_if", "measured_if")
 MAX_BODY = 64_000
 MAX_UPLOAD = 20_000_000  # a year of Wallet CSV is ~100 KB; a statement PDF well under 1 MB
+# Seconds a connection may sit idle mid-request. Without it a client that
+# promises a body and never sends it holds its thread forever.
+REQUEST_TIMEOUT = 30
+UPLOADS = threading.BoundedSemaphore(1)
 
 ISO_DATE = re.compile(r"(?<!\d)(\d{4}-\d{2}-\d{2})(?!\d)")
 WIKI_ID = re.compile(r"<!--\s*id:(penny-[\w-]+)\s*-->")
@@ -1346,10 +1351,7 @@ def _audit(cfg: Config, lines: list[dict]) -> None:
     if not lines:
         return
     try:
-        d = cfg.root / "data"
-        d.mkdir(exist_ok=True)
-        with open(d / "board-decisions.jsonl", "a") as f:
-            f.writelines(json.dumps(a, default=str) + "\n" for a in lines)
+        fsio.append_lines(cfg.root / "data" / "board-decisions.jsonl", [json.dumps(a, default=str) for a in lines])
     except Exception:  # noqa: BLE001 -- the save stands; a failed audit line is logged
         _log(f"board: saved, but the audit line was not written: {lines!r}\n{traceback.format_exc()}")
 
@@ -4095,6 +4097,8 @@ def make_handler(cfg: Config, today=date.today, names=()):
     names = frozenset(n.lower().rstrip(".") for n in names)
 
     class Handler(BaseHTTPRequestHandler):
+        timeout = REQUEST_TIMEOUT  # StreamRequestHandler sets it on the socket
+
         def _send(self, body: bytes, ctype: str, code: int = 200):
             self.send_response(code)
             self.send_header("Content-Type", ctype)
@@ -4173,6 +4177,8 @@ def make_handler(cfg: Config, today=date.today, names=()):
                 return self._refuse("request too large", 413)
             try:
                 payload = json.loads(self.rfile.read(n) or b"null")
+            except TimeoutError:
+                return self._refuse("the request body stalled", 408)
             except ValueError as e:
                 return self._json({"error": f"not JSON: {e}"}, 400)
             try:
@@ -4198,12 +4204,21 @@ def make_handler(cfg: Config, today=date.today, names=()):
                 return self._refuse("send the file as the request body", 400)
             if n > MAX_UPLOAD:
                 return self._refuse("file too large", 413)
-            data = self.rfile.read(n)
+            # One upload at a time: each holds up to MAX_UPLOAD in memory.
+            if not UPLOADS.acquire(blocking=False):
+                return self._refuse("another upload is running; try again", 503)
             try:
+                data = self.rfile.read(n)
+                if len(data) < n:
+                    return self._refuse("the upload ended early", 400)
                 lines = apple.import_upload(data, cfg.root / "data" / "apple")
+            except TimeoutError:
+                return self._refuse("the upload stalled", 408)
             except Exception as e:  # noqa: BLE001 -- the server's boundary: logged, answered 500
                 _log(f"board: POST /import/apple failed\n{traceback.format_exc()}")
                 return self._json({"error": f"{type(e).__name__}: {e}"}, 500)
+            finally:
+                UPLOADS.release()
             _log(f"board: /import/apple: {'; '.join(lines)}")
             ok = all(": skipped" not in line for line in lines)
             self._json({"result": lines}, 200 if ok else 400)

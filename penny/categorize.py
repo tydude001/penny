@@ -247,17 +247,18 @@ def save_override(path, txn_id: str, family: str | None = None, category: str | 
     from pathlib import Path
 
     p = Path(path)
-    ov = load_overrides(p)
-    if clear:
-        ov.pop(txn_id, None)
-        entry = {}
-    else:
-        entry = ov.setdefault(txn_id, {})
-        if family:
-            entry["family"] = family
-        if category:
-            entry["category"] = category
-    fsio.write_atomic(p, json.dumps(ov, indent=1, sort_keys=True) + "\n")
+    with fsio.locked(p):  # re-read inside the lock, so a save elsewhere isn't lost
+        ov = load_overrides(p)
+        if clear:
+            ov.pop(txn_id, None)
+            entry = {}
+        else:
+            entry = ov.setdefault(txn_id, {})
+            if family:
+                entry["family"] = family
+            if category:
+                entry["category"] = category
+        fsio.write_atomic(p, json.dumps(ov, indent=1, sort_keys=True) + "\n")
     return entry
 
 

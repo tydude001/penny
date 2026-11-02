@@ -21,11 +21,14 @@ RETURNED were not, and are dropped.
 from __future__ import annotations
 
 import csv
+import io
 import json
 import re
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
+
+from . import fsio
 
 PAID = {"REGULAR", "WEIGHT_ADJUSTED", "SUBSTITUTED"}
 
@@ -205,12 +208,13 @@ SHEET_COLUMNS = [
 
 def write_sheet(items: list[Item], path: str | Path, annualize: float, top: int) -> None:
     """The top-N items with blank Costco columns, for pricing by hand."""
-    with open(path, "w", newline="", encoding="utf-8") as f:
-        w = csv.writer(f)
-        w.writerow(SHEET_COLUMNS)
-        for i, it in enumerate(items[:top], 1):
-            w.writerow([i, it.name, it.shelf, it.orders, f"{it.qty:g}", f"{it.spend:.2f}",
-                        f"{it.spend * annualize:.0f}", it.unit_price, "", "", "", "", ""])
+    buf = io.StringIO(newline="")
+    w = csv.writer(buf)
+    w.writerow(SHEET_COLUMNS)
+    for i, it in enumerate(items[:top], 1):
+        w.writerow([i, it.name, it.shelf, it.orders, f"{it.qty:g}", f"{it.spend:.2f}",
+                    f"{it.spend * annualize:.0f}", it.unit_price, "", "", "", "", ""])
+    fsio.write_atomic(Path(path), buf.getvalue())  # order history: 0600 like the rest
 
 
 @dataclass

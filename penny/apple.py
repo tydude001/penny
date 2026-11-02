@@ -17,12 +17,14 @@ from __future__ import annotations
 
 import csv
 import hashlib
-import shutil
 import tempfile
+import threading
 import time
 from collections import Counter
 from datetime import date, datetime
 from pathlib import Path
+
+from . import fsio
 
 KINDS = {"Purchase": "purchase", "Other": "purchase", "Payment": "payment",
          "Installment": "installment", "Credit": "refund", "Debit": "fee"}
@@ -82,8 +84,18 @@ def load(apple_dir: Path) -> list[dict]:
     return sorted(rows.values(), key=lambda r: (r["date"], r["transaction_id"]))
 
 
+# The board's upload and a CLI import in one process can't race the
+# exists-then-write below.
+_IMPORTING = threading.Lock()
+
+
 def import_files(paths: list[Path], apple_dir: Path) -> list[str]:
     """Copy Wallet CSVs and statement PDFs into ``apple_dir``; one line per file saying what happened."""
+    with _IMPORTING:
+        return _import_files(paths, apple_dir)
+
+
+def _import_files(paths: list[Path], apple_dir: Path) -> list[str]:
     from .statements import ParseError, parse
 
     apple_dir.mkdir(parents=True, exist_ok=True)
@@ -113,7 +125,7 @@ def import_files(paths: list[Path], apple_dir: Path) -> list[str]:
             continue
         if dest.exists():
             dest = apple_dir / f"{p.stem}-{datetime.now().astimezone():%Y%m%dT%H%M%S}{p.suffix}"
-        shutil.copy2(p, dest)
+        fsio.write_atomic(dest, p.read_bytes())  # never a torn CSV a reader sees half of
         out.append(f"{p.name}: imported ({what})")
     return out
 
