@@ -7,24 +7,24 @@ so the instance keeps that in ``costco-pairs.toml``, one ``[[pair]]`` each,
 and names the perk the total answers::
 
     perk = "costco.prices"            # the assumptions.toml perk it measures
-    skip = ["1234567"]                # Costco items with no Walmart counterpart (a
+    skip = ["100009"]                 # Costco items with no Walmart counterpart (a
                                       #   monitor, movie tickets): out of the coverage.
                                       #   Top level, so above the first [[pair]]
 
     [[pair]]
-    name = "Lean ground beef"
+    name = "Ground beef"
     unit = "lb"
-    costco = { 88739 = 10 }           # Costco item number = units in one, or
+    costco = { 100001 = 10 }          # Costco item number = units in one, or
                                       #   "by weight" for one priced a lb at the shelf
-    walmart = ["824841960"]           # Walmart item ids, priced off its "$8.47/lb" label
+    walmart = ["200001"]              # Walmart item ids, priced off its "$6.00/lb" label
 
     [[pair]]
-    name = "Coke Zero"
+    name = "Soda"
     unit = "can"
-    costco = { 891742 = 35 }
-    walmart = { 13812835 = 24 }       # id = units, when Walmart shows no label
-    walmart_price = 0.64              # $ a unit read off walmart.com: used when
-    walmart_price_on = "2026-09-23"   #   it is newer than the newest order, or none
+    costco = { 100002 = 35 }
+    walmart = { 200002 = 24 }         # id = units, when Walmart shows no label
+    walmart_price = 0.50              # $ a unit read off walmart.com: used when
+    walmart_price_on = "2026-01-15"   #   it is newer than the newest order, or none
 
 Walmart's price a unit is the median over the orders in the 180 days up to its
 newest one, so one sale doesn't set it; a price over 90 days older than the
@@ -206,7 +206,7 @@ def load(path: Path) -> dict | None:
 
 
 def label_price(label: str, unit: str) -> float | None:
-    """Walmart's own unit price, e.g. "$8.47/lb" or "42.7¢/oz", in $ a
+    """Walmart's own unit price, e.g. "$6.00/lb" or "40.0¢/oz", in $ a
     ``unit``; None when it is per something else or unreadable."""
     m = _LABEL.match(label or "")
     if not m or m.group(4).strip().lower() != unit:
