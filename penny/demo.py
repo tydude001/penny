@@ -125,6 +125,7 @@ base = 45
 high = 80
 
 [prime.video]
+note = "What Prime Video alone would be worth to you"
 ask = "Would you pay for Prime Video on its own?"
 how = "Worth $0 if you'd cancel it, $108 if you'd pay $8.99 a month."
 low_if = "No, I'd cancel it"
@@ -140,6 +141,7 @@ base = 40
 high = 120
 
 [walmart_plus.delivery]
+note = "Delivery fees you'd pay without Walmart+"
 ask = "Without Walmart+, would you pay for grocery delivery?"
 how = "The weekly order is 52 deliveries a year; paid delivery runs about $8-10 an order, pickup is free."
 low_if = "No, I'd use free pickup"
@@ -155,6 +157,7 @@ base = 0
 high = 0
 
 [costco.prices]
+note = "Costco vs elsewhere on what you buy there"
 ask = "Is Costco cheaper on what you buy there?"
 how = "Price your usual Costco basket at your other store: the gap over a year is the answer."
 low_if = "No real saving"

@@ -245,7 +245,7 @@ class Decision:
     key: str
     title: str
     membership: str | None
-    kind: str  # external | placeholder | choice | defaults | verify | baseline | apply | tier | fee
+    kind: str  # external | placeholder | choice | defaults | verify | baseline | apply | declined | tier | fee
     swing: float | None  # dollars a year; None when the model can't say
     explain: list[str]
     source: dict  # {"file", "section", "keys"}
@@ -400,7 +400,10 @@ def derive(
             continue
         members = card_members.get(ckey, [])
         rates = f"Rates: {rate_text(card, labels)}."
-        if members and ckey not in held_cards:
+        if members and ckey not in held_cards and card.get("declined_on"):
+            edge = max(verdicts[headline_key(rules, mk, with_card=True)].edge for mk in members)
+            out.append(Decision(f"declined:{ckey}", f"Skipped the {clabel}", members[0], "declined", edge, [f"Declined on {card['declined_on']}."], {"file": "rules.toml", "section": section, "keys": ["declined_on"]}, None, settled=True, sub=f"declined {card['declined_on']}", data={"section": section, "on": str(card["declined_on"])}))
+        elif members and ckey not in held_cards:
             for mkey in members:
                 m = mems[mkey]
                 mlabel = m.get("label", mkey)
@@ -1208,7 +1211,7 @@ class Refused(ValueError):
 
 ALLOWED = (
     "assumptions: [<membership>.<perk>] low, base, high (numbers) and note (text); "
-    "rules: [cards.<card>] verified (true only) and verified_on (YYYY-MM-DD); [held] <membership>_tier (one of its tiers); "
+    "rules: [cards.<card>] verified (true only), verified_on and declined_on (YYYY-MM-DD); [held] <membership>_tier (one of its tiers); "
     "[cards.<baseline>] default_rate and rates.<family already listed> (0 to 1); "
     "[memberships.<m>] or [memberships.<m>.tiers.<t>] fee (0 or more); "
     "assumptions: [budget] <category already listed> (0 or more)"
@@ -1259,8 +1262,8 @@ def check_write(w, rules: dict) -> Write:
         baseline = rules.get("held", {}).get("baseline_card")
         if len(parts) == 2 and parts[0] == "cards" and key == "verified" and subkey is None:
             ok = value is True
-        elif len(parts) == 2 and parts[0] == "cards" and key == "verified_on" and subkey is None:
-            ok = isinstance(value, str) and _iso_date(value)
+        elif len(parts) == 2 and parts[0] == "cards" and key in ("verified_on", "declined_on") and subkey is None:
+            ok = isinstance(value, str) and _iso_date(value) and (key == "verified_on" or parts[1] in rules.get("cards", {}))
         elif section == "held" and key.endswith("_tier") and subkey is None:
             ok = isinstance(value, str) and value in (mems.get(key[: -len("_tier")], {}).get("tiers") or {})
         elif section == f"cards.{baseline}" and ((key == "default_rate" and subkey is None) or (key == "rates" and subkey in rules.get("cards", {}).get(baseline, {}).get("rates", {}))):
@@ -1302,7 +1305,14 @@ def record(cfg: Config, payload, today: date | None = None, now: datetime | None
                 # rules.toml is the instance, read over the defaults: the value
                 # in force is the merged one, and a key only the defaults have
                 # is written into the instance as an override.
-                before = _lookup(home.merged_text(text) if w.file == "rules" else tomllib.loads(text), w)
+                try:
+                    before = _lookup(home.merged_text(text) if w.file == "rules" else tomllib.loads(text), w)
+                except KeyError:
+                    # declined_on is the one key the board adds: a card you
+                    # said no to carries the day you did.
+                    if (w.file, w.key) != ("rules", "declined_on"):
+                        raise
+                    before = None
                 if before == value and isinstance(before, bool) == isinstance(value, bool):
                     new_text[w.file] = (old, text)
                     continue
@@ -1521,6 +1531,30 @@ h2{font:var(--text-overline);letter-spacing:.1em;text-transform:uppercase;color:
 .q.open .go{font-size:0}
 .q.open .go::after{content:"Close";font:var(--text-label);font-weight:600}
 @media (max-width:640px){.qhead{grid-template-columns:28px minmax(0,1fr)}.qside{grid-column:2;flex-direction:row;align-items:center;justify-content:space-between;padding-top:0}}
+.rows{display:flex;flex-direction:column;border:1px solid var(--input);border-radius:var(--radius);background:var(--card)}
+.rows .q{border:0;border-radius:0;background:none}
+.rows .q + .q{border-top:1px solid var(--border)}
+.rhead{display:flex;align-items:center;gap:16px;padding:16px 18px}
+.rtext{flex:1;min-width:0}
+.ract{display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+.ract .btn{white-space:nowrap}
+.rmore{background:none;border:0;padding:2px 0;font:var(--text-caption);color:var(--muted-foreground);min-height:28px}
+.rmore:hover{color:var(--foreground)}
+.q.open .rmore::before{content:"Close · "}
+.qin{display:flex;gap:6px;align-items:center}
+.qin input{width:6.5rem}
+.qst{font:var(--text-caption)}
+.qst.err{color:var(--crit)}
+.qfull{color:var(--muted-foreground)}
+.laters{display:flex;flex-direction:column;border:1px solid var(--input);border-radius:var(--radius);background:var(--card)}
+.laters details{border-top:0;padding:0 18px}
+.laters details + details{border-top:1px solid var(--border)}
+.laters summary{justify-content:space-between;gap:16px;min-height:48px;color:var(--foreground);font:var(--text-body)}
+.laters .due{color:var(--warn);white-space:nowrap}
+.laters summary > span:first-of-type{flex:1;text-align:left}
+.laters details > :not(summary){margin:0 0 12px}
+.later-more summary{color:var(--muted-foreground)}
+@media (max-width:640px){.rhead{flex-wrap:wrap;gap:10px}.rhead .badge{order:0}.rtext{flex-basis:100%;order:1}.ract{order:2;flex-direction:row;align-items:center;width:100%;justify-content:space-between}}
 .qbody{display:none;border-top:1px solid var(--border);padding:16px;flex-direction:column;gap:14px}
 .q.open .qbody{display:flex}
 .how{background:var(--muted);border-radius:var(--radius);padding:10px 12px}
@@ -1924,10 +1958,27 @@ JS = """
     b.setAttribute('role','img');b.setAttribute('aria-label','a year: low '+money(lo)+', best guess '+money(base)+', high '+money(hi));
   });
 
-  function openItem(q){q.classList.add('open');var h=q.querySelector('.qhead');if(h)h.setAttribute('aria-expanded','true');}
-  document.querySelectorAll('.qhead').forEach(function(h){
-    h.addEventListener('click',function(){var o=h.parentElement.classList.toggle('open');h.setAttribute('aria-expanded',o?'true':'false');});
+  function openItem(q){q.classList.add('open');var h=q.querySelector('.qhead,.rmore');if(h)h.setAttribute('aria-expanded','true');}
+  document.querySelectorAll('.qhead,.rmore').forEach(function(h){
+    h.addEventListener('click',function(){var q=h.closest('.q'),o=q.classList.toggle('open');h.setAttribute('aria-expanded',o?'true':'false');});
   });
+  // One tap on a To do row: the recommendation goes through the same form
+  // (and the same /record) as answering by hand.
+  document.querySelectorAll('[data-q]').forEach(function(b){b.addEventListener('click',function(){
+    var q=b.closest('.q'),f=q.querySelector('form.rec'),st=q.querySelector('.qst'),kind=b.dataset.q;
+    function say(t,err){st.className='qst'+(err?' err':'');st.textContent=t;}
+    if(!f){say('Nothing to save here.',true);return;}
+    if(kind==='choice'){
+      var c=f.querySelector(".choice[data-fill='"+b.dataset.v+"']");
+      if(!c){say('That answer is gone; reload.',true);return;}
+      c.click();
+    }else if(kind==='answer'){
+      var i=b.parentElement.querySelector('input'),a=f.querySelector('[name=answer]');
+      if(!i.value.trim()){say('Type a number first.',true);i.focus();return;}
+      a.value=i.value;a.dispatchEvent(new Event('input',{bubbles:true}));
+    }
+    openItem(q);say('Saving…');f.requestSubmit();
+  });});
   function fromHash(){
     var t=location.hash&&document.getElementById(decodeURIComponent(location.hash.slice(1)));
     if(!t)return;
@@ -2135,6 +2186,38 @@ class Item:
     form: str = ""  # rendered form, empty when nothing on the page writes it
     saved: str = ""  # rendered "What gets saved"
     d: Decision | None = None
+    badge: str = ""  # To do's lead word: keep | drop | needs you | skip | check
+    line: str = ""  # To do's one line under the title (html); ``why`` when empty
+    quick: str = ""  # To do's one-tap answer on the row (html), the recommendation
+
+
+APPLY_BAR = 50.0  # a new card earning less than this a year over the baseline isn't worth applying for
+
+
+def _quick_choice(value: float, label: str) -> str:
+    """Picks the form's choice of ``value`` and saves it."""
+    return f"<button type=button class='btn primary' data-q=choice data-v='{value:g}'>{escape(label)}</button>"
+
+
+def _quick_answer(placeholder: float) -> str:
+    """A number typed on the row goes in as the form's answer and saves."""
+    return (f"<span class=qin><input type=number inputmode=decimal step=any aria-label='dollars a year' placeholder='{placeholder:g}'>"
+            "<button type=button class='btn primary' data-q=answer>Save</button></span>")
+
+
+def _quick_submit(label: str) -> str:
+    """Saves the row's form as it stands."""
+    return f"<button type=button class=btn data-q=submit>{escape(label)}</button>"
+
+
+def _perk_line(p: dict) -> str:
+    """``_perk_why`` in one short sentence, for the To do row."""
+    m, net, base = p["mlabel"], p["net"], p["base"]
+    if net - base + p["low"] >= 0:
+        return f"{m} stays a keep whatever you answer."
+    if net - base + p["high"] < 0:
+        return f"{m} stays a drop whatever you answer."
+    return f"{usd(base - net)} or more a year makes {m} a keep; less, a drop."
 
 
 def _verdict_word(net: float) -> str:
@@ -2243,10 +2326,11 @@ def _verified_inputs(section: str, card: dict, today: date) -> str:
     return out
 
 
-def _zero_perks_text(rules: dict, v: model.Verdict, ps: list[dict]) -> tuple[str, str, str]:
-    """Title, why and how for a membership whose perks are all at zero and
-    whose verdict can't tell. When penny measured one of them from the
-    stores' captures, the title is the answer that measurement gives."""
+def _zero_perks_text(rules: dict, v: model.Verdict, ps: list[dict]) -> tuple[str, str, str, str, str, str]:
+    """Title, why, how, the row's line, badge and one-tap answer for a
+    membership whose perks are all at zero and whose verdict can't tell.
+    When penny measured one of them from the stores' captures, the title is
+    what that measurement says and the one tap takes it."""
     ml, net = ps[0]["mlabel"], ps[0]["net"]
     counted = [f"the {usd(v.fee)} fee"]
     if round(v.reward):
@@ -2259,17 +2343,22 @@ def _zero_perks_text(rules: dict, v: model.Verdict, ps: list[dict]) -> tuple[str
     if not got:
         why = f"{so_far}, so the verdict can't tell. If what it saves you comes to {usd(-net)} or more a year, it's a keep; less, a drop."
         how = "Answer the ones that apply. Count what you would pay without the membership, not list prices. An answer of $0 is an answer: it settles the verdict as a drop."
-        return f"Does {ml} save you {usd(-net)} or more a year?", why, how
+        line = f"{usd(-net)} or more a year makes {ml} a keep; less, a drop."
+        return f"Does {ml} save you {usd(-net)} or more a year?", why, how, line, "needs you", ""
     saved = sum(p["measured"] for p in got)
     after = net + saved
     r = got[0]["receipts"]
     n = sum(p["receipts"]["items"] for p in got)
     through = date.fromisoformat(r["last"])
     what = f"saves you about {usd(saved)}" if saved >= 0 else f"costs you about {usd(-saved)} more"
-    why = (f"Your receipts say it {what} a year on what you buy there ({n} item{'s' if n != 1 else ''} checked against your Walmart prices, "
+    why = (f"Your receipts say it {what} a year on what you buy there ({n} item{'s' if n != 1 else ''} checked against what you'd pay elsewhere, "
            f"through {through:%b %-d}). {so_far}, so that makes it a {_verdict_word(after)}." + (" Under a year of receipts: a scaled guess." if r["partial"] else ""))
     how = "Pick what your receipts show to settle it, or put in your own number. Answer the others only if they apply."
-    return f"{ml}: {_verdict_word(after)}, {signed(after)} a year", why, how
+    word = _verdict_word(after)
+    title = f"{ml} saves you about {usd(saved)} a year" if saved >= 0 else f"{ml} costs you about {usd(-saved)} a year more"
+    line = f"From your receipts against what you'd pay elsewhere. That makes it a {word} at {signed(after)}." + (" A scaled guess: under a year of receipts." if r["partial"] else "")
+    quick = _quick_choice(got[0]["measured"], f"Use {usd(saved)}") if len(got) == 1 else ""
+    return title, why, how, line, word, quick
 
 
 def plan(s: State) -> list[Item]:
@@ -2291,7 +2380,9 @@ def plan(s: State) -> list[Item]:
             p = d.data
             how = p.get("how") or ("The value in the file is a placeholder. " if k == "placeholder" else "") + f"Count what you would otherwise pay without {mlabel}, not the list price. Note in the file: {p['note']}"
             group = "ask" if abs(d.swing or 0) >= WASH else "quiet"
-            items.append(Item(d.key, group, p.get("ask") or f"What is {p['label']} worth to you a year?", escape(_perk_why(p)), escape(how), f"up to {usd(abs(d.swing or 0))}/yr", abs(d.swing or 0), d.membership, _perk_form([p], p["net"], mlabel), _saved(d), d))
+            quick = _quick_choice(p["measured"], f"Use {usd(p['measured'])}") if "measured" in p and "measured_if" in p else _quick_answer(p["base"])
+            items.append(Item(d.key, group, p.get("ask") or f"What is {p['label']} worth to you a year?", escape(_perk_why(p)), escape(how), f"up to {usd(abs(d.swing or 0))}/yr", abs(d.swing or 0), d.membership, _perk_form([p], p["net"], mlabel), _saved(d), d,
+                              badge="needs you", line=escape(_perk_line(p)), quick=quick))
         elif k == "defaults":
             stuck = [m for m, r in rows.items() if "can't tell" in r.verdict]
             rest = [p for p in d.data["perks"] if p["membership"] not in stuck]
@@ -2300,9 +2391,9 @@ def plan(s: State) -> list[Item]:
                 if not ps:
                     continue
                 net, ml = ps[0]["net"], ps[0]["mlabel"]
-                title, why, how = _zero_perks_text(rules, verdicts[headline_key(rules, m)], ps)
+                title, why, how, line, badge, quick = _zero_perks_text(rules, verdicts[headline_key(rules, m)], ps)
                 sub = Decision(f"ask:{m}", f"{ml} perks at zero", m, "defaults", None, d.explain, {"file": "assumptions.toml", "section": ", ".join(p["section"] for p in ps), "keys": list(LEVELS) + ["note"]}, "perks", sub=", ".join(p["label"] for p in ps))
-                items.append(Item(sub.key, "ask", title, escape(why), escape(how), f"{usd(-net)}/yr", -net, m, _perk_form(ps, net, ml), _saved(sub), sub))
+                items.append(Item(sub.key, "ask", title, escape(why), escape(how), f"{usd(-net)}/yr", -net, m, _perk_form(ps, net, ml), _saved(sub), sub, badge=badge, line=escape(line), quick=quick))
             if rest:
                 names = ", ".join(f"{p['mlabel']} {p['label']}" for p in rest)
                 forms = "".join(f"<details><summary>Put a value on {escape(p['mlabel'])} {escape(p['label'])}</summary>{_perk_form([p], p['net'], p['mlabel'])}</details>" for p in rest)
@@ -2322,13 +2413,15 @@ def plan(s: State) -> list[Item]:
                 audit=f"checked the terms on {today.isoformat()}",
             )
             group = "check" if abs(d.swing or 0) >= WASH else "quiet"
-            items.append(Item(d.key, group, f"Does the {clabel} still pay these rates?", escape(why), escape(how), f"{usd(d.swing or 0)}/yr", abs(d.swing or 0), d.membership, form, _saved(d), d))
+            items.append(Item(d.key, group, f"Does the {clabel} still pay these rates?", escape(why), escape(how), f"{usd(d.swing or 0)}/yr", abs(d.swing or 0), d.membership, form, _saved(d), d,
+                              badge="check", quick=_quick_submit("Yes, they match")))
         elif k == "baseline":
             p = d.data
             form = _cpp_form(p["section"], p["cpp"], p["mults"], labels)
             why = f"Half a cent either way moves a verdict by at most {usd(d.swing or 0)} a year."
             if abs(d.swing or 0) >= WASH:
-                items.append(Item(d.key, "check", f"What is a {p['label']} point worth to you?", escape(f"Set at {p['cpp']:g}¢. {why} Every card's edge is measured against this card."), "", f"{usd(d.swing or 0)} per ½¢", abs(d.swing or 0), None, form, _saved(d), d))
+                items.append(Item(d.key, "check", f"What is a {p['label']} point worth to you?", escape(f"Set at {p['cpp']:g}¢. {why} Every card's edge is measured against this card."), "", f"{usd(d.swing or 0)} per ½¢", abs(d.swing or 0), None, form, _saved(d), d,
+                                  badge="check", line=escape(f"Set at {p['cpp']:g}¢. {why}")))
             else:
                 items.append(Item(d.key, "quiet", f"{p['label']} points at {p['cpp']:g}¢", escape(f"{why} Not worth revisiting unless how you redeem points changes."), form=f"<details><summary>Change it</summary>{form}</details>", d=d))
         elif k == "apply":
@@ -2343,7 +2436,17 @@ def plan(s: State) -> list[Item]:
                 if d.data.get("unverified"):
                     form = _simple_form(_verified_inputs(d.data["section"], cards[ckey], today), "I checked its rates", audit=f"checked the terms on {today.isoformat()}")
                 why = f"It would earn {usd(d.swing or 0)} a year more than the {blabel}. {mlabel} nets {signed(w.net['base'])} with it, {signed(wo.net['base'])} without."
-                items.append(Item(d.key, "ask", f"Apply for the {clabel}?", escape(why), escape("Applying happens outside this page. Once you hold it, add it to [held].cards in rules.toml."), f"{usd(d.swing or 0)}/yr", d.swing or 0, d.membership, form, _saved(d), d))
+                how = "Applying happens outside this page. Once you hold it, add it to [held].cards in rules.toml."
+                if (d.swing or 0) < APPLY_BAR:
+                    # First in the body, so the row's one tap submits it.
+                    skip = _simple_form(f"<input type=hidden data-file=rules data-section='{escape(d.data['section'])}' data-key=declined_on data-type=string value='{today.isoformat()}'>"
+                                        "<p class=hint>Records today as declined_on; the question leaves To do.</p>", "Skip it", audit="declined on the board")
+                    items.append(Item(d.key, "ask", f"Don't apply for the {clabel}", escape(why), escape(how), f"{usd(d.swing or 0)}/yr", d.swing or 0, d.membership, skip + form, _saved(d), d,
+                                      badge="skip", line=escape(f"It would earn only {usd(d.swing or 0)} a year more than the {blabel}."), quick=_quick_submit("OK, skip it")))
+                else:
+                    items.append(Item(d.key, "ask", f"Apply for the {clabel}?", escape(why), escape(how), f"{usd(d.swing or 0)}/yr", d.swing or 0, d.membership, form, _saved(d), d, badge="needs you"))
+        elif k == "declined":
+            items.append(Item(d.key, "quiet", d.title, escape(f"You said no on {d.data['on']}. It would earn {usd(d.swing or 0)} a year more than the {blabel}. Delete declined_on in rules.toml [{d.data['section']}] to be asked again."), d=d))
         elif k == "tier":
             p = d.data
             held = p["labels"][p["held"]]
@@ -2358,11 +2461,11 @@ def plan(s: State) -> list[Item]:
             elif d.settled:
                 items.append(Item(d.key, "quiet", f"{mlabel}: stay on {held}", escape(d.sub), d=d))
             else:
-                items.append(Item(d.key, "ask", f"Switch {mlabel} from {held}?", escape(" ".join([d.sub + "."] + d.explain)), "", f"{signed(d.swing or 0)}/yr", abs(d.swing or 0), d.membership, _simple_form(inner, "Save tier"), _saved(d), d))
+                items.append(Item(d.key, "ask", f"Switch {mlabel} from {held}?", escape(" ".join([d.sub + "."] + d.explain)), "", f"{signed(d.swing or 0)}/yr", abs(d.swing or 0), d.membership, _simple_form(inner, "Save tier"), _saved(d), d, badge="needs you", line=escape(d.sub + ".")))
         elif k == "fee":
             p = d.data
             inner = f"<label class=amount>List fee<input type=number inputmode=decimal step=any min=0 data-file=rules data-section='{escape(p['section'])}' data-key=fee data-type=number value='{p['value']:g}'>$ a year</label><p class=hint>If the charge is something else, leave the fee and tighten fee_patterns in rules.toml instead.</p>"
-            items.append(Item(d.key, "check", f"Did the {mlabel} fee change?", escape(" ".join(d.explain)), "", f"{signed(d.swing or 0)}/yr", abs(d.swing or 0), d.membership, _simple_form(inner, "Update the list fee"), _saved(d), d))
+            items.append(Item(d.key, "check", f"Did the {mlabel} fee change?", escape(" ".join(d.explain)), "", f"{signed(d.swing or 0)}/yr", abs(d.swing or 0), d.membership, _simple_form(inner, "Update the list fee"), _saved(d), d, badge="check"))
     order = {"now": 0, "ask": 1, "check": 2, "quiet": 3, "wiki": 4}
     return sorted(items, key=lambda i: (order[i.group], -i.weight if i.group in ("ask", "check") else 0))
 
@@ -2393,6 +2496,33 @@ def render_question(n: int, it: Item) -> str:
     )
 
 
+BADGE_COLOR = {"keep": "var(--good)", "drop": "var(--crit)", "needs you": "var(--warn)", "skip": "var(--muted-foreground)", "check": "var(--info)"}
+
+
+def render_row(it: Item) -> str:
+    """One To do row: penny's call, one line, and the tap that accepts it;
+    the rest of the item (how, the form, what gets saved) opens beneath."""
+    badge = f"<span class=badge style='--c:{BADGE_COLOR.get(it.badge, 'var(--muted-foreground)')}'>{escape(it.badge.upper())}</span>" if it.badge else ""
+    more = "Other answer · Why" if it.quick else "Answer"
+    return (
+        f"<article class='q trow' id='{escape(it.key)}'{_tags(it)}>"
+        f"<div class=rhead>{badge}<div class=rtext><span class=qt>{escape(it.title)}</span><span class=qwhy>{it.line or it.why}</span></div>"
+        f"<div class=ract>{it.quick}<button type=button class=rmore aria-expanded=false>{more}</button><span class=qst role=status></span></div></div>"
+        f"<div class=qbody>{f'<p class=qfull>{it.why}</p>' if it.line else ''}"
+        f"{f'<p class=how><b>How to answer</b>{it.how}</p>' if it.how else ''}{it.form}{it.saved}</div></article>"
+    )
+
+
+def render_later(it: Item, today: date) -> str:
+    """A dated to-do row: what, and when, with the detail one tap away."""
+    days = (it.d.due - today).days
+    when = "today" if days == 0 else f"{days} day{'s' if days != 1 else ''}"
+    return (
+        f"<details class=later id='{escape(it.key)}'{_tags(it)}><summary><span>{escape(it.title)}</span><span class='mono due'>{when}</span></summary>"
+        f"<p>{it.why}</p><p class=hint>Due {it.d.due.isoformat()}. When it's done, rewrite the to-do row <code>{escape(it.d.source['keys'][0])}</code>; the page reads it on reload.</p></details>"
+    )
+
+
 def render_plain(it: Item) -> str:
     extra = it.form
     if it.group == "quiet" and it.saved and it.form and not it.form.startswith("<details"):
@@ -2400,15 +2530,6 @@ def render_plain(it: Item) -> str:
     stake = f"<span class=mono>{it.stake}</span>" if it.stake else ""
     tag = "<span class=tag>to-do</span>" if it.group == "wiki" else ""
     return f"<li id='{escape(it.key)}'{_tags(it)}><div class=t>{escape(it.title)}{stake}{tag}</div><p>{it.why}</p>{extra}</li>"
-
-
-def render_now(it: Item, today: date) -> str:
-    days = (it.d.due - today).days
-    return (
-        f"<div class=now id='{escape(it.key)}'{_tags(it)}><div><h3>{escape(it.title)}</h3><p>{it.why}</p>"
-        f"<p class=hint>When it's done, rewrite the to-do row <code>{escape(it.d.source['keys'][0])}</code>; the page reads it on reload.</p></div>"
-        f"<div class=days>{days}<small>day{'s' if days != 1 else ''} to {it.d.due.isoformat()}</small></div></div>"
-    )
 
 
 def _split_verdict(v: str) -> tuple[str, str]:
@@ -3250,7 +3371,7 @@ def render_memberships(s: State, v: View | None = None) -> str:
         tone = {"keep": "good", "drop": "crit"}.get(word, "neutral")
         lines = "".join(f"<div><span>{escape(label)}{f' <i>{escape(mark)}</i>' if mark else ''}</span><span class=mono>{signed(x)}</span></div>" for label, x, mark in net_lines(rules, s.assumptions, mv))
         hang = v.hang(r.membership)
-        hang_html = f"<p class=hang>Hangs on question {v.numbers[hang.key]}:</p><a class=btn href='/todo#{escape(hang.key)}'>{escape(hang.title)}</a>" if hang else ""
+        hang_html = f"<p class=hang>Hangs on question:</p><a class=btn href='/todo#{escape(hang.key)}'>{escape(hang.title)}</a>" if hang else ""
         cards.append(
             f"<article class=vcard id='m-{escape(r.membership)}'><div class=head><div><h3>{escape(r.title)}</h3><p class=sub>{escape(r.sub)}</p></div><span class='badge {tone}'>{escape(word)}</span></div>"
             f"<p class=net>{signed(r.base)}<small>a year</small></p>"
@@ -3288,10 +3409,9 @@ def render_todo(s: State, v: View | None = None) -> str:
     open_items = by["ask"] + by["check"]
     counts: dict[str, int] = {}
     for it in v.items:
-        for tag in item_tags(it):
-            counts.setdefault(tag, 0)
-            if it.group != "quiet":  # settled rows hide behind "Show settled"
-                counts[tag] += 1
+        if it.group in ("ask", "check"):  # a filter only for what there is to answer
+            for tag in item_tags(it):
+                counts[tag] = counts.get(tag, 0) + 1
 
     def tag_label(t):
         kind, _, key = t.partition(":")
@@ -3302,22 +3422,25 @@ def render_todo(s: State, v: View | None = None) -> str:
         return t
 
     order = sorted(counts, key=lambda t: ({"m": 0, "c": 1}.get(t.partition(":")[0], 2), tag_label(t)))
-    chips = "<button type=button class=fchip data-tag='' aria-pressed=true>All</button>" + "".join(
+    chips = ("<button type=button class=fchip data-tag='' aria-pressed=true>All</button>" if len(order) > 1 else "") + "".join(
         f"<button type=button class=fchip data-tag='{escape(t)}' aria-pressed=false>{escape(tag_label(t))}<span class=mono>{counts[t]}</span></button>" for t in order
-    ) + f"<span class=grow></span><button type=button class=fchip data-settled aria-pressed=false>Show settled<span class=mono>{len(by['quiet'])}</span></button>"
+    ) if len(order) > 1 else ""
+    chips += f"<span class=grow></span><button type=button class=fchip data-settled aria-pressed=false>Show settled<span class=mono>{len(by['quiet'])}</span></button>" if by["quiet"] else ""
     rides = sum(i.weight for i in open_items)
-    side = f"<span class=note>{len(open_items)} open · {len(by['quiet'])} settled" + (f" · {usd(rides)} a year rides on them" if rides else "") + "</span>"
-    body = [
-        _title("To do", "Every open input, biggest money first. Answering one writes it into the file it belongs to, and the row leaves on reload. Nothing here is a hand-kept list.", side),
-        f"<div class=filters role=group aria-label='filter'>{chips}</div>",
-    ]
-    body.extend(render_now(it, s.today) for it in by["now"])
-    ask = f"<div class=qlist>{''.join(render_question(v.numbers[it.key], it) for it in by['ask'])}</div>" if by["ask"] else "<p class=empty>Nothing to answer. Every verdict rests on inputs you've given.</p>"
-    body.append(_block("Answer · only you know these", ask))
-    if by["check"]:
-        body.append(_block("Check · compare with the terms", f"<div class=qlist>{''.join(render_question(v.numbers[it.key], it) for it in by['check'])}</div>"))
-    if by["wiki"]:  # read-only here, so after what the page can answer
-        body.append(_block("Also open, in the to-do file", f"<ul class=plain>{''.join(render_plain(it) for it in by['wiki'])}</ul>", note="Tracked in the to-do file; nothing on this page changes them."))
+    n = len(open_items)
+    lead = f"{n} to answer, biggest money first. Penny's call leads each one; tap to accept it." if n else "Nothing to answer: every verdict rests on inputs you've given."
+    side = f"<span class=note>{usd(rides)} a year rides on them</span>" if rides else ""
+    body = [_title("To do", lead, side)]
+    if chips:
+        body.append(f"<div class=filters role=group aria-label='filter'>{chips}</div>")
+    if open_items:
+        body.append(f"<div class=rows>{''.join(render_row(it) for it in open_items)}</div>")
+    later = "".join(render_later(it, s.today) for it in by["now"])
+    if by["wiki"]:  # read-only here: undated to-do rows fold into one line
+        rest = "".join(render_plain(it) for it in by["wiki"])
+        later += f"<details class=later-more><summary><span>{len(by['wiki'])} more in the to-do file, waiting on someone or something</span></summary><ul class=plain>{rest}</ul></details>"
+    if later:
+        body.append(_block("Later", f"<div class=laters>{later}</div>"))
     if by["quiet"]:
         settled = "".join(render_plain(it) for it in by["quiet"])
         body.append(f"<div class=settled hidden>{_block('Settled · nothing to do', f'<ul class=plain>{settled}</ul>', note='Settled, or moves less than $10 a year.')}</div>")

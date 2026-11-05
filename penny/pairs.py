@@ -26,6 +26,14 @@ and names the perk the total answers::
     walmart_price = 0.50              # $ a unit read off walmart.com: used when
     walmart_price_on = "2026-01-15"   #   it is newer than the newest order, or none
 
+    [[pair]]
+    name = "Toilet paper"
+    unit = "sheet"
+    costco = { 100003 = 6000 }
+    store = "amazon"                  # bought elsewhere without Costco: a family in
+    price = 0.005                     #   rules.toml, its card's rate and this $ a unit
+    price_on = "2026-01-15"           #   (price / price_on: walmart_price's names)
+
 Walmart's price a unit is the median over the orders in the 180 days up to its
 newest one, so one sale doesn't set it; a price over 90 days older than the
 last receipt is flagged stale. Coverage is the share of the year's Costco
@@ -72,11 +80,12 @@ class Row:
     unit: str
     bought: float  # units a year at Costco
     paid: float  # $ a year at Costco, net of coupons
-    walmart_unit: float | None  # $ a unit at Walmart; None: unpriced
+    walmart_unit: float | None  # $ a unit at the other store (Walmart unless the pair names one); None: unpriced
     walmart_from: str  # where that price came from, or why there is none
     saving: float | None  # $ a year; None: unpriced
     price_on: date | None = None  # the newest Walmart price's date
     stale: bool = False  # that date is over STALE_DAYS before the last receipt
+    store: str = ""  # the other store's label when it isn't Walmart
 
     @property
     def costco_unit(self) -> float | None:
@@ -119,7 +128,12 @@ class Measure:
         top = sorted(self.priced, key=lambda r: -abs(r.saving))
         lines = ", ".join(f"{r.name} {_money(r.saving)}" for r in top[:4])
         more = f" and {len(top) - 4} more" if len(top) > 4 else ""
-        out = (f"Measured from your Costco receipts through {self.last:%b %-d, %Y} against your Walmart prices: "
+        by_store: dict[str, list[str]] = {}
+        for r in self.priced:
+            if r.store:
+                by_store.setdefault(r.store, []).append(r.name)
+        prices = "your Walmart prices" + (" (" + "; ".join(f"{st}'s for {', '.join(ns)}" for st, ns in by_store.items()) + ")" if by_store else "")
+        out = (f"Measured from your Costco receipts through {self.last:%b %-d, %Y} against {prices}: "
                f"{len(top)} item{'s' if len(top) != 1 else ''} ({lines}{more}), after the "
                f"{(self.walmart_rate - self.costco_rate) * 100:.3g}% more you'd earn on the card at Walmart.")
         if self.partial:
@@ -190,13 +204,14 @@ def load(path: Path) -> dict | None:
         if not isinstance(p["costco"], dict):
             raise ValueError(f"{FILE}: pair {i} costco must be a table of item number = units in one pack")  # noqa: TRY004 -- a file error, as the rest
         costco_ids = _ids(p["costco"], f"pair {i} costco", weighed=True)
-        price = p.get("walmart_price")
+        price = p.get("walmart_price", p.get("price"))
         if price is not None and (not isinstance(price, (int, float)) or isinstance(price, bool) or price <= 0):
-            raise ValueError(f"{FILE}: pair {i} walmart_price must be $ a unit, above 0")
+            raise ValueError(f"{FILE}: pair {i} walmart_price (or price) must be $ a unit, above 0")
         pairs.append({"name": str(p["name"]), "unit": str(p["unit"]).strip().lower(), "costco": costco_ids,
                       "walmart": _ids(p.get("walmart", []), f"pair {i} walmart"),
                       "walmart_price": float(price) if price is not None else None,
-                      "walmart_price_on": str(p.get("walmart_price_on", ""))})
+                      "walmart_price_on": str(p.get("walmart_price_on", p.get("price_on", ""))),
+                      "store": str(p["store"]) if "store" in p else None})
     skip = doc.get("skip", [])
     if not isinstance(skip, list):
         raise ValueError(f"{FILE}: skip must be a list of Costco item numbers")  # noqa: TRY004 -- a file error, as the rest
@@ -245,7 +260,7 @@ def _walmart_price(lines: list[walmart.Line], p: dict) -> tuple[float | None, da
             src = f"order {newest.isoformat()}" if n == 1 else f"median of {n} orders to {newest.isoformat()}"
             return mid, newest, src
     if p["walmart_price"]:
-        return p["walmart_price"], on, "walmart.com" + (f", {on.isoformat()}" if on else "")
+        return p["walmart_price"], on, (p.get("store_label") or "walmart.com") + (f", {on.isoformat()}" if on else "")
     return None, None, (f"Walmart order: {why}" if why else "no Walmart order of it, and no walmart_price")
 
 
@@ -269,14 +284,24 @@ def measure(spec: dict, receipts: list[dict], lines: list[walmart.Line], rules: 
     w_rate, _ = model.best_held_rate(rules, spec["walmart_family"])
     c_rate, _ = model.best_held_rate(rules, spec["costco_family"])
     rows = []
+    families = rules.get("families", {})
     for p in spec["pairs"]:
+        rate, label = w_rate, ""
+        if p.get("store"):
+            if p["store"] not in families:
+                raise ValueError(f"{FILE}: pair {p['name']!r} store = {p['store']!r} is not a family in rules.toml")
+            rate, _ = model.best_held_rate(rules, p["store"])
+            label = str(families[p["store"]].get("label", p["store"]))
+            p = {**p, "walmart": {}, "store_label": label}  # priced only by its price: the Walmart orders aren't its store
         got = [(items[k], n) for k, n in p["costco"].items() if k in items]
         bought = sum(it.weight if n == BY_WEIGHT else it.units * n for it, n in got) * scale
         paid = sum(it.spend for it, _ in got) * scale
         price, on, source = _walmart_price(lines, p)
-        saving = None if price is None else bought * price * (1 - w_rate) - paid * (1 - c_rate)
+        if price is None and label:
+            source = f"no price for {label}"
+        saving = None if price is None else bought * price * (1 - rate) - paid * (1 - c_rate)
         stale = bool(price is not None and on and (last - on).days > STALE_DAYS)
-        rows.append(Row(p["name"], p["unit"], bought, paid, price, source, saving, on, stale))
+        rows.append(Row(p["name"], p["unit"], bought, paid, price, source, saving, on, stale, label))
     paired = {k for p in spec["pairs"] for k in p["costco"]}
     skip = spec.get("skip", set())
     total = sum(it.spend for it in ranked if it.item_number not in skip) * scale

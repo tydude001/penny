@@ -100,3 +100,11 @@ def test_every_board_page_has_content(inst):
                        "/transactions": "COSTCO WHSE", "/memberships": "Walmart+", "/checks": "6 tie",
                        "/cashflow": "Spent"}.items():
         assert text in bodies[path], path
+
+
+def test_every_demo_perk_can_be_answered_on_the_board(inst):
+    # The board's perk form writes a note with every answer and never adds a
+    # key, so a perk without one refuses the answer.
+    doc = board._toml(inst / "assumptions.toml")
+    perks = [(m, k) for m, sec in doc.items() if isinstance(sec, dict) for k, p in sec.items() if isinstance(p, dict) and "base" in p]
+    assert perks and all("note" in doc[m][k] for m, k in perks), [f"{m}.{k}" for m, k in perks if "note" not in doc[m][k]]

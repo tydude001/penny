@@ -172,22 +172,26 @@ def _perk(section, **kw):
 
 
 def test_the_zero_perks_ask_counts_the_reward_not_just_the_fee():
-    title, why, _ = board._zero_perks_text(_instance_rules(), _verdict(), [_perk("costco.prices"), _perk("costco.gas")])
+    title, why, _, line, badge, quick = board._zero_perks_text(_instance_rules(), _verdict(), [_perk("costco.prices"), _perk("costco.gas")])
     assert title == "Does Costco save you $61 or more a year?"
+    assert (line, badge, quick) == ("$61 or more a year makes Costco a keep; less, a drop.", "needs you", "")
     assert "Counting the $130 fee and the $69 Executive reward, Costco nets −$61 a year" in why
     assert "Nothing is counted" not in why
 
 
 def test_a_measured_perk_turns_the_ask_into_the_answer():
     measured = _perk("costco.prices", measured=80.0, receipts={"items": 5, "last": "2026-10-29", "partial": False})
-    title, why, how = board._zero_perks_text(_instance_rules(), _verdict(), [measured, _perk("costco.gas")])
-    assert title == "Costco: keep, +$19 a year"
+    title, why, how, line, badge, quick = board._zero_perks_text(_instance_rules(), _verdict(), [measured, _perk("costco.gas")])
+    assert title == "Costco saves you about $80 a year" and badge == "keep"
+    assert line == "From your receipts against what you'd pay elsewhere. That makes it a keep at +$19."
+    assert "data-q=choice data-v='80'" in quick and "Use $80" in quick
     assert why.startswith("Your receipts say it saves you about $80 a year on what you buy there (5 items")
     assert "through Oct 29" in why and why.endswith("makes it a keep.")
     assert how.startswith("Pick what your receipts show")
     short = _perk("costco.prices", measured=30.0, receipts={"items": 2, "last": "2026-10-29", "partial": True})
-    title, why, _ = board._zero_perks_text(_instance_rules(), _verdict(), [short])
-    assert title == "Costco: drop, −$31 a year" and "a scaled guess" in why
+    title, why, _, line, badge, _ = board._zero_perks_text(_instance_rules(), _verdict(), [short])
+    assert title == "Costco saves you about $30 a year" and badge == "drop"
+    assert "drop at −$31" in line and "a scaled guess" in why
 
 
 # -- the CLI -----------------------------------------------------------------
@@ -312,3 +316,20 @@ def test_penny_pairs_suggest_prints_blocks_and_the_misses(tmp_path, capsys):
     assert "coverage: the priced pairs are" in out
     assert "# BNLS/SL BRST: $30 a year at Costco" in out and 'walmart = ["w80"]' in out
     assert "no Walmart match: MYSTERY [99]" in out
+
+
+def test_a_pair_can_name_the_store_you_would_buy_it_at_instead(tmp_path):
+    rules = {**RULES, "families": {**RULES["families"], "amazon": {"label": "Amazon"}},
+             "cards": {**RULES["cards"], "store": {**RULES["cards"]["store"], "rates": {"walmart_delivery": 0.05, "amazon": 0.03}}}}
+    text = PAIRS.replace('walmart = { w20 = 2000 }', 'walmart = { w20 = 2000 }\nstore = "amazon"\nprice = 0.004\nprice_on = "2026-05-01"')
+    p = tmp_path / pairs.FILE
+    p.write_text(text)
+    from penny import costco, walmart
+    m = pairs.measure(pairs.load(p), costco.receipts(RECEIPTS), walmart.lines_from_capture(ORDERS), rules)
+    paper = next(r for r in m.rows if r.name == "Paper")
+    assert (paper.store, paper.walmart_unit, paper.walmart_from) == ("Amazon", 0.004, "Amazon, 2026-05-01")  # not the Walmart order
+    assert paper.saving == pytest.approx(12000 * 0.004 * 0.97 - 48.0 * 0.98)  # at the Amazon card's 3%
+    assert "your Walmart prices (Amazon's for Paper)" in m.summary()
+    p.write_text(text.replace('store = "amazon"', 'store = "nowhere"'))
+    with pytest.raises(ValueError, match="not a family"):
+        pairs.measure(pairs.load(p), costco.receipts(RECEIPTS), walmart.lines_from_capture(ORDERS), rules)
