@@ -390,7 +390,7 @@ def _load_state(cfg: Config, today: date) -> State:
         t.account = names.get(t.account_number, t.account) if t.account_number else t.account
     wiki = parse_wiki(cfg.wiki.read_text()) if cfg.wiki and cfg.wiki.is_file() else []
     a = worth.analyze(i, wiki, today, cfg.root)
-    return State(today, None, rules, assumptions, i.window, i.first, len(i.tx), i.spend, i.found, a.decisions, a.rows,
+    return State(today, None, rules, i.assumptions, i.window, i.first, len(i.tx), i.spend, i.found, a.decisions, a.rows,
                  None, walmart_measured=i.walmart_measured, costco_measured=i.costco_measured, worth=i.worth, carried=i.carried,
                  credit_years=i.credit_years, walmart_feed_span=i.walmart_feed_span, txns=i.everything, root=cfg.root, analysis=a)
 
@@ -1519,8 +1519,8 @@ def _verified_inputs(section: str, card: dict, today: date) -> str:
 def _zero_perks_text(rules: dict, v: model.Verdict, ps: list[dict]) -> tuple[str, str, str, str, str, str]:
     """Title, why, how, the row's line, badge and one-tap answer for a
     membership whose perks are all at zero and whose verdict can't tell.
-    When penny measured one of them from the stores' captures, the title is
-    what that measurement says and the one tap takes it."""
+    A perk penny measured from the stores' captures is counted already
+    (``worth.apply_measures``), so it never reaches here."""
     ml, net = ps[0]["mlabel"], ps[0]["net"]
     counted = [f"the {usd(v.fee)} fee"]
     if round(v.reward):
@@ -1529,26 +1529,10 @@ def _zero_perks_text(rules: dict, v: model.Verdict, ps: list[dict]) -> tuple[str
     if round(v.attributable):
         counted.append(f"{usd(v.attributable)} of card rewards it causes")
     so_far = f"Counting {_and(counted)}, {ml} nets {signed(net)} a year before any perk"
-    got = [p for p in ps if p.get("receipts")]
-    if not got:
-        why = f"{so_far}, so the verdict can't tell. If what it saves you comes to {usd(-net)} or more a year, it's a keep; less, a drop."
-        how = "Answer the ones that apply. Count what you would pay without the membership, not list prices. An answer of $0 is an answer: it settles the verdict as a drop."
-        line = f"{usd(-net)} or more a year makes {ml} a keep; less, a drop."
-        return f"Does {ml} save you {usd(-net)} or more a year?", why, how, line, "needs you", ""
-    saved = sum(p["measured"] for p in got)
-    after = net + saved
-    r = got[0]["receipts"]
-    n = sum(p["receipts"]["items"] for p in got)
-    through = date.fromisoformat(r["last"])
-    what = f"saves you about {usd(saved)}" if saved >= 0 else f"costs you about {usd(-saved)} more"
-    why = (f"Your receipts say it {what} a year on what you buy there ({n} item{'s' if n != 1 else ''} checked against what you'd pay elsewhere, "
-           f"through {through:%b %-d}). {so_far}, so that makes it a {_verdict_word(after)}." + (" Under a year of receipts: a scaled guess." if r["partial"] else ""))
-    how = "Pick what your receipts show to settle it, or put in your own number. Answer the others only if they apply."
-    word = _verdict_word(after)
-    title = f"{ml} saves you about {usd(saved)} a year" if saved >= 0 else f"{ml} costs you about {usd(-saved)} a year more"
-    line = f"From your receipts against what you'd pay elsewhere. That makes it a {word} at {signed(after)}." + (" A scaled guess: under a year of receipts." if r["partial"] else "")
-    quick = _quick_choice(got[0]["measured"], f"Use {usd(saved)}") if len(got) == 1 else ""
-    return title, why, how, line, word, quick
+    why = f"{so_far}, so the verdict can't tell. If what it saves you comes to {usd(-net)} or more a year, it's a keep; less, a drop."
+    how = "Answer the ones that apply. Count what you would pay without the membership, not list prices. An answer of $0 is an answer: it settles the verdict as a drop."
+    line = f"{usd(-net)} or more a year makes {ml} a keep; less, a drop."
+    return f"Does {ml} save you {usd(-net)} or more a year?", why, how, line, "needs you", ""
 
 
 def _verdicts(s: State) -> dict:
@@ -1593,6 +1577,11 @@ def plan(s: State) -> list[Item]:
                 names = ", ".join(f"{p['mlabel']} {p['label']}" for p in rest)
                 forms = "".join(f"<details><summary>Put a value on {escape(p['mlabel'])} {escape(p['label'])}</summary>{_perk_form([p], p['net'], p['mlabel'])}</details>" for p in rest)
                 items.append(Item(d.key, "quiet", "Perks counted as $0", escape(f"{names}. Change one only if you would pay for it without the membership."), form=forms, d=d))
+        elif k == "measured":
+            how = ("Look the items up in the Walmart app and put each price and today's date in costco-pairs.toml "
+                   "(walmart_price, walmart_price_on), or capture your Walmart orders again; the saving updates on the next load.")
+            items.append(Item(d.key, "check", d.title, escape(" ".join(d.explain)), escape(how), f"{usd(d.swing or 0)}/yr", abs(d.swing or 0), d.membership, d=d,
+                              badge="check", line=escape(d.sub + ".")))
         elif k == "verify":
             ckey = d.data["section"].split(".", 1)[1]
             card = cards[ckey]
@@ -1698,13 +1687,14 @@ def render_row(it: Item) -> str:
     """One To do row: penny's call, one line, and the tap that accepts it;
     the rest of the item (how, the form, what gets saved) opens beneath."""
     badge = f"<span class=badge style='--c:{BADGE_COLOR.get(it.badge, 'var(--muted-foreground)')}'>{escape(it.badge.upper())}</span>" if it.badge else ""
-    more = "Other answer · Why" if it.quick else "Answer"
+    more = "Other answer · Why" if it.quick else "Answer" if it.form else "Details"
+    head = "How to answer" if it.form else "How to fix it"
     return (
         f"<article class='q trow' id='{escape(it.key)}'{_tags(it)}>"
         f"<div class=rhead>{badge}<div class=rtext><span class=qt>{escape(it.title)}</span><span class=qwhy>{it.line or it.why}</span></div>"
         f"<div class=ract>{it.quick}<button type=button class=rmore aria-expanded=false>{more}</button><span class=qst role=status></span></div></div>"
         f"<div class=qbody>{f'<p class=qfull>{it.why}</p>' if it.line else ''}"
-        f"{f'<p class=how><b>How to answer</b>{it.how}</p>' if it.how else ''}{it.form}{it.saved}</div></article>"
+        f"{f'<p class=how><b>{head}</b>{it.how}</p>' if it.how else ''}{it.form}{it.saved}</div></article>"
     )
 
 

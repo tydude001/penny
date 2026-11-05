@@ -152,15 +152,25 @@ def _instance_rules():
     return model.resolve_points(home.load_rules(INSTANCE / "rules.toml"))
 
 
-def test_derive_offers_the_measurement_over_a_hand_typed_one(tmp_path):
+def test_a_measurement_counts_as_the_perk_with_nothing_to_answer(tmp_path):
     m = _measure(tmp_path=tmp_path)
-    ds = worth.derive(_instance_rules(), ASSUMPTIONS, {"costco": 3000.0}, 1.0, {}, [], date(2026, 6, 1), None, [m])
-    perks = {p["section"]: p for d in ds if d.key == "perks:zero" for p in d.data["perks"]}
-    prices = perks["costco.prices"]
-    assert prices["measured"] == round(m.saving) and prices["measured_if"] == "What your receipts show"
-    assert prices["receipts"] == {"items": 3, "last": "2026-05-31", "partial": False}
-    assert "Not priced: Seltzer" in prices["how"]
-    assert "receipts" not in perks["costco.gas"]
+    applied = worth.apply_measures(ASSUMPTIONS, [m])
+    prices = applied["costco"]["prices"]
+    x = float(round(m.saving))
+    assert (prices["low"], prices["base"], prices["high"]) == (x, x, x)
+    assert prices["measured_by"]["items"] == 3 and prices["measured_by"]["last"] == "2026-05-31"
+    assert ASSUMPTIONS["costco"]["prices"]["base"] == 0  # the file's values are untouched
+    ds = worth.derive(_instance_rules(), applied, {"costco": 3000.0}, 1.0, {}, [], date(2026, 6, 1), None, [m])
+    asked = {p["section"] for d in ds if d.key == "perks:zero" for p in d.data["perks"]} | {d.key for d in ds}
+    assert "costco.prices" not in asked and "perk:costco.prices" not in asked
+    assert "costco.gas" in asked  # an unmeasured perk is still a question
+
+
+def test_your_recorded_answer_beats_the_measurement(tmp_path):
+    m = _measure(tmp_path=tmp_path)
+    mine = {"costco": {"prices": {"low": 40, "base": 40, "high": 40, "note": "Recorded 2026-06-01: my own number"}}}
+    assert worth.apply_measures(mine, [m]) == mine
+    assert worth.apply_measures({}, [m])["costco"]["prices"]["base"] == float(round(m.saving))  # no section: added
 
 
 def _verdict(fee=130.0, reward=69.0, attributable=0.0):
@@ -179,19 +189,30 @@ def test_the_zero_perks_ask_counts_the_reward_not_just_the_fee():
     assert "Nothing is counted" not in why
 
 
-def test_a_measured_perk_turns_the_ask_into_the_answer():
-    measured = _perk("costco.prices", measured=80.0, receipts={"items": 5, "last": "2026-10-29", "partial": False})
-    title, why, how, line, badge, quick = board._zero_perks_text(_instance_rules(), _verdict(), [measured, _perk("costco.gas")])
-    assert title == "Costco saves you about $80 a year" and badge == "keep"
-    assert line == "From your receipts against what you'd pay elsewhere. That makes it a keep at +$19."
-    assert "data-q=choice data-v='80'" in quick and "Use $80" in quick
-    assert why.startswith("Your receipts say it saves you about $80 a year on what you buy there (5 items")
-    assert "through Oct 29" in why and why.endswith("makes it a keep.")
-    assert how.startswith("Pick what your receipts show")
-    short = _perk("costco.prices", measured=30.0, receipts={"items": 2, "last": "2026-10-29", "partial": True})
-    title, why, _, line, badge, _ = board._zero_perks_text(_instance_rules(), _verdict(), [short])
-    assert title == "Costco saves you about $30 a year" and badge == "drop"
-    assert "drop at −$31" in line and "a scaled guess" in why
+def _mb(saving=250.0, stale=(), coverage=0.6):
+    return {"items": 11, "last": "2026-10-29", "partial": False, "coverage": coverage, "stale": list(stale),
+            "unpriced": [], "summary": "", "saving": saving}
+
+
+def test_a_measured_perk_is_checked_only_when_old_prices_carry_it():
+    rules = _instance_rules()
+    assert worth.freshness_decision(rules, "costco", "prices", _mb()) is None
+    assert worth.freshness_decision(rules, "costco", "prices", _mb(stale=[("Soda", "2026-01-03", -14.0)])) is None  # $14 of $250
+    d = worth.freshness_decision(rules, "costco", "prices", _mb(stale=[("Beef", "2026-06-09", 150.0), ("Water", "2025-11-02", 39.0)]))
+    assert d.kind == "measured" and d.title == "Check 2 old Walmart prices behind the Costco saving"
+    assert d.sub == "$189 of the $250 rides on them"
+    assert "Beef (Jun 9, +$150), Water (Nov 2, 2025, +$39)" in " ".join(d.explain)
+    low = worth.freshness_decision(rules, "costco", "prices", _mb(coverage=0.3))
+    assert low.title == "Pair more Costco items" and "30%" in low.sub
+
+
+def test_a_measured_perk_says_where_its_number_came_from():
+    rules = _instance_rules()
+    applied = {"costco": {"prices": {"low": 250.0, "base": 250.0, "high": 250.0, "measured_by": _mb()}}}
+    v = model.Verdict("costco", "executive", False, 130.0, 3000.0, 0.0, {}, 0.0, {}, 69.0, model.perks(applied, "costco"))
+    lines = worth.net_lines(rules, applied, v)
+    assert ("Prices, from your receipts", 250.0, "receipts to Oct 29") in lines
+    assert v.net["base"] == 189.0 and worth.verdict_line(rules, applied, v)[0] == "keep"
 
 
 # -- the CLI -----------------------------------------------------------------
@@ -206,6 +227,25 @@ def test_penny_pairs_prints_each_line_and_the_total(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "costco.prices: receipts 2025-06-01 -> 2026-05-31 (365 days)" in out
     assert "Beef" in out and "unpriced" in out and "over 3 priced pairs" in out
+
+
+def test_the_board_and_the_report_both_count_the_measured_saving(tmp_path, capsys):
+    from feedfix import install
+    install(tmp_path)
+    shutil.copy(INSTANCE / "rules.toml", tmp_path / "rules.toml")
+    (tmp_path / "assumptions.toml").write_text("[costco.prices]\nlow = 0\nbase = 0\nhigh = 0\n")
+    (tmp_path / "data" / "costco-receipts-2026-06-01.json").write_text(json.dumps(RECEIPTS))
+    (tmp_path / "data" / "walmart-orders-2026-06-01.json").write_text(json.dumps(ORDERS))
+    (tmp_path / pairs.FILE).write_text(PAIRS)
+    s = board.load_state(board.Config(tmp_path, tmp_path / "rules.toml", tmp_path / "assumptions.toml"), date(2026, 6, 1))
+    saving = s.assumptions["costco"]["prices"]["base"]
+    assert saving and s.assumptions["costco"]["prices"]["measured_by"]
+    v = s.analysis.verdicts[worth.headline_key(s.rules, "costco")]
+    assert v.perks["base"] == saving
+    cli.main(["--home", str(tmp_path), "report"])
+    out = capsys.readouterr().out
+    assert any(line.startswith("Costco") and f"${saving:,.0f}" in line for line in out.splitlines())
+    assert "base = 0" in (tmp_path / "assumptions.toml").read_text()  # nothing written
 
 
 def test_penny_pairs_without_a_pairing_file_says_what_it_needs(tmp_path):

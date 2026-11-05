@@ -108,6 +108,7 @@ def cmd_report(args):
         i = worth.load(args.home, rules, assumptions, args.export, year=args.year, days=args.days, env=getattr(args, "env", "production"))
     except (ValueError, FileNotFoundError) as e:
         sys.exit(str(e))
+    assumptions = i.assumptions  # with what the store captures measured
     labels = {f.key: f.label for f in cat.build_families(rules)}
     labels[cat.OTHER] = "other"
     verdicts = model.evaluate(rules, assumptions, i.spend, i.window.annualize)

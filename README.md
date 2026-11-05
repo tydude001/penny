@@ -103,7 +103,8 @@ For each membership, per year:
   history and a `costco-pairs.toml` naming which Costco item replaces which
   Walmart product, `penny pairs` prices what you bought at Costco at
   Walmart's prices, says how much of your Costco spend the pairs cover, and
-  the board offers that total as the answer. `penny pairs --suggest`
+  the verdicts count that total as the perk, with nothing to answer, unless
+  you record a number of your own. `penny pairs --suggest`
   proposes pairs for the biggest unpaired items (`penny/pairs.py` has the
   file format).
 - **fee** — the list fee from `rules.toml`; the fee actually charged in the

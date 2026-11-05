@@ -225,8 +225,9 @@ def derive(
 ) -> list[Decision]:
     """Every unresolved input, in no particular order (``rank`` orders them).
     ``spend`` is the window's spend by family, as ``model.evaluate`` takes it.
-    ``measures`` are perks penny worked out from the stores' own captures
-    (``pairs``): each is offered as the perk's measured answer."""
+    A perk penny measured from the stores' own captures arrives already
+    counted (``apply_measures``) and is only checked for stale prices;
+    ``measures`` is kept for the callers."""
     today = today or datetime.now().astimezone().date()
     verdicts = verdicts or by_key(model.evaluate(rules, assumptions, spend, annualize))
     labels = _labels(rules)
@@ -242,6 +243,11 @@ def derive(
         mlabel = mems[mkey].get("label", mkey)
         net = verdicts[headline_key(rules, mkey)].net["base"]
         for pkey, p in _perks(assumptions, mkey).items():
+            if "measured_by" in p:
+                d = freshness_decision(rules, mkey, pkey, p["measured_by"])
+                if d:
+                    out.append(d)
+                continue
             lo, base, hi = (float(p[lvl]) for lvl in LEVELS)
             note = str(p.get("note", ""))
             st = perk_state(p)
@@ -252,12 +258,6 @@ def derive(
             data.update({k: str(p[k]) for k in PROMPTS if k in p})
             if "measured_if" in p and _is_num(p.get("measured")):
                 data["measured"] = float(p["measured"])
-            mm = next((m for m in measures or [] if m.perk == section and m.priced), None)
-            if mm:
-                # Worked out from the captures on every load: it replaces any
-                # hand-typed measured / measured_if, which goes stale.
-                data.update(measured=float(round(mm.saving)), measured_if="What your receipts show", how=mm.summary(),
-                            receipts={"items": len(mm.priced), "last": mm.last.isoformat(), "partial": mm.partial})
             src = {"file": "assumptions.toml", "section": section, "keys": list(LEVELS) + ["note"]}
             explain = [
                 f"{mlabel} net, base: {signed(net)}. With {plabel} at its low {signed(n_lo)}, at its high {signed(n_hi)}.",
@@ -527,7 +527,11 @@ def net_lines(rules: dict, assumptions: dict, v: model.Verdict) -> list[tuple[st
             zero.append(label)
             continue
         st = perk_state(p)
-        mark = "placeholder" if st.placeholder else f"recorded {st.recorded_on}" if st.recorded_on else ""
+        mb = p.get("measured_by")
+        if mb:
+            label = f"{label}, from your receipts"
+        mark = (f"receipts to {date.fromisoformat(mb['last']):%b %-d}" if mb else "placeholder" if st.placeholder
+                else f"recorded {st.recorded_on}" if st.recorded_on else "")
         out.append((label[:1].upper() + label[1:], base, mark))
     if zero:
         s = _and(zero)
@@ -732,6 +736,65 @@ WALMART_FLOOR = ("Walmart spend is a floor: a Rocket Money export drops OnePay p
 COSTCO_FAMILY = "costco"  # the OnePay feed the export undercounts; rules.toml says why
 
 
+STALE_SHARE = 0.25  # old prices carrying this much of a measured saving get a freshness check
+LOW_COVERAGE = 0.5  # a measurement covering less of the store's spend than this says so
+
+
+def apply_measures(assumptions: dict, measures: list) -> dict:
+    """``assumptions`` with each measured perk's low / base / high set to what
+    the stores' captures say it saves (``pairs``), so the verdicts count it
+    with nothing to answer. A perk you recorded by hand (``penny set`` or a
+    board answer) keeps your number. Returns a copy; the file is untouched,
+    and ``measured_by`` on the perk says what the number came from."""
+    out = copy.deepcopy(assumptions)
+    for m in measures:
+        if not m.priced or "." not in m.perk:
+            continue
+        mkey, pkey = m.perk.split(".", 1)
+        p = out.setdefault(mkey, {}).setdefault(pkey, {"low": 0, "base": 0, "high": 0})
+        if not isinstance(p, dict) or perk_state(p).recorded:
+            continue
+        x = float(round(m.saving))
+        p.update(low=x, base=x, high=x, measured_by={
+            "items": len(m.priced), "last": m.last.isoformat(), "partial": m.partial, "coverage": m.coverage,
+            "stale": [(r.name, r.price_on.isoformat(), float(r.saving)) for r in m.priced if r.stale],
+            "unpriced": [r.name for r in m.rows if r.saving is None], "summary": m.summary(), "saving": x,
+        })
+    return out
+
+
+def freshness_decision(rules: dict, mkey: str, pkey: str, mb: dict) -> Decision | None:
+    """A check on a measured perk, only when its number needs refreshing:
+    old Walmart prices behind a real share of it, or too little of the
+    store's spend paired to say much."""
+    mlabel = rules.get("memberships", {}).get(mkey, {}).get("label", mkey)
+    stale = sorted(mb["stale"], key=lambda r: -abs(r[2]))
+    riding = sum(abs(r[2]) for r in stale)
+    low_cov = mb["coverage"] < LOW_COVERAGE
+    if not low_cov and (not stale or riding < max(WASH, STALE_SHARE * abs(mb["saving"]))):
+        return None
+    section = f"{mkey}.{pkey}"
+    explain = [f"Counted: {usd(mb['saving'])} a year, from your receipts through {date.fromisoformat(mb['last']):%b %-d}."]
+    if stale:
+        last = date.fromisoformat(mb["last"])
+
+        def when(on: str) -> str:
+            d = date.fromisoformat(on)
+            return f"{d:%b %-d}" if d.year == last.year else f"{d:%b %-d, %Y}"
+        old = ", ".join(f"{n} ({when(on)}, {signed(x)})" for n, on, x in stale)
+        explain.append(f"Walmart prices over {pairs.STALE_DAYS} days old: {old}.")
+    if low_cov:
+        explain.append(f"The paired items are {mb['coverage']:.0%} of what you buy at {mlabel}; pair more with penny pairs --suggest.")
+    if stale:
+        title = f"Check {len(stale)} old Walmart price{'s' if len(stale) != 1 else ''} behind the {mlabel} saving"
+        sub = f"{usd(riding)} of the {usd(mb['saving'])} rides on them"
+    else:
+        title = f"Pair more {mlabel} items"
+        sub = f"only {mb['coverage']:.0%} of your {mlabel} spend is priced"
+    return Decision(f"fresh:{section}", title, mkey, "measured", riding or None, explain,
+                    {"file": "costco-pairs.toml", "section": section, "keys": []}, None, sub=sub, data=dict(mb, section=section))
+
+
 @dataclass
 class Inputs:
     """Everything the verdicts are worked out from, read once."""
@@ -752,6 +815,7 @@ class Inputs:
     walmart_measured: object = None
     walmart_feed_span: float | None = None  # the feed's Walmart rows over the capture's own days
     costco_measured: object = None
+    file_assumptions: dict | None = None  # assumptions.toml as written; ``assumptions`` has the measurements in
 
     @property
     def annual(self) -> dict[str, float]:
@@ -811,6 +875,9 @@ def load(root: Path, rules: dict, assumptions: dict, export: Path | None = None,
         span = sum(t.amount for t in txns if t.family in (WALMART_FAMILY, WALMART_ONLINE, WALMART_STORE)
                    and measured.first <= t.date <= measured.last)
 
+    measures = [m for m in [pairs.for_instance(root, rules)] if m]
+    file_assumptions, assumptions = assumptions, apply_measures(assumptions, measures)
+
     # Card worth is about the card's own accounts, so it reads the rows, not
     # the Walmart-adjusted spend.
     alts = assumptions.get("card_worth", {}).get("alternatives", [])
@@ -821,9 +888,9 @@ def load(root: Path, rules: dict, assumptions: dict, export: Path | None = None,
         cardworth.card_worth(rules, assumptions, carried[alts[0]]) if alts else [],
         _credit_years(credit_rows, rules), credit_rows,
         Path(export) if export is not None else None, everything,
-        [m for m in [pairs.for_instance(root, rules)] if m],
-        measured, span,
+        measures, measured, span,
         costco.newest_measured(root / "data") if COSTCO_FAMILY in families else None,
+        file_assumptions,
     )
 
 
