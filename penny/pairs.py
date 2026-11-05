@@ -57,14 +57,13 @@ negative: that is Costco costing more on the line.
 
 from __future__ import annotations
 
-import json
 import re
 import tomllib
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from pathlib import Path
 
-from . import costco, model, walmart
+from . import captures, costco, model, walmart
 
 FILE = "costco-pairs.toml"
 WALMART_FAMILY = "walmart_delivery"
@@ -324,8 +323,7 @@ def for_instance(root: Path, rules: dict) -> Measure | None:
     rpath, wpath = _newest(data, "costco-receipts-*.json"), _newest(data, "walmart-orders-*.json")
     if rpath is None:
         return None
-    with open(rpath, encoding="utf-8") as f:
-        receipts = costco.receipts(json.load(f))
+    receipts = captures.read(rpath, costco.receipts)
     lines = walmart.load_lines(wpath) if wpath else []
     m = measure(spec, receipts, lines, rules)
     if m:

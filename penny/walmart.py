@@ -22,13 +22,12 @@ from __future__ import annotations
 
 import csv
 import io
-import json
 import re
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
-from . import fsio
+from . import captures, fsio
 
 PAID = {"REGULAR", "WEIGHT_ADJUSTED", "SUBSTITUTED"}
 
@@ -116,8 +115,7 @@ def lines_from_capture(capture: list[dict]) -> list[Line]:
 
 
 def load_lines(path: str | Path) -> list[Line]:
-    with open(path, encoding="utf-8") as f:
-        return lines_from_capture(json.load(f))
+    return captures.read(Path(path), lines_from_capture)
 
 
 def listed_orders(capture: list[dict]) -> dict[str, tuple[date, float]]:
@@ -251,8 +249,5 @@ def measured(capture: list[dict], path: Path) -> Measured | None:
 
 
 def newest_measured(data: Path) -> Measured | None:
-    found = sorted(data.glob("walmart-orders-*.json"))
-    if not found:
-        return None
-    with open(found[-1], encoding="utf-8") as f:
-        return measured(json.load(f), found[-1])
+    path = captures.newest(data, "walmart-orders-*.json")
+    return captures.read(path, lambda cap: measured(cap, path)) if path else None

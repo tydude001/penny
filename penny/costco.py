@@ -16,10 +16,11 @@ folded into that item so the spend is what was actually paid.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
+
+from . import captures
 
 WAREHOUSE = "In-Warehouse"
 
@@ -122,7 +123,11 @@ class Measured:
 
 
 def measured(capture: list[dict], path: Path) -> Measured | None:
-    recs = summary(receipts(capture))
+    return from_receipts(receipts(capture), path)
+
+
+def from_receipts(raw: list[dict], path: Path) -> Measured | None:
+    recs = summary(raw)
     wh = [r for r in recs if r.warehouse]
     if not wh:
         return None
@@ -132,8 +137,5 @@ def measured(capture: list[dict], path: Path) -> Measured | None:
 
 
 def newest_measured(data: Path) -> Measured | None:
-    found = sorted(data.glob("costco-receipts-*.json"))
-    if not found:
-        return None
-    with open(found[-1], encoding="utf-8") as f:
-        return measured(json.load(f), found[-1])
+    path = captures.newest(data, "costco-receipts-*.json")
+    return from_receipts(captures.read(path, receipts), path) if path else None
