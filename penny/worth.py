@@ -35,6 +35,26 @@ def _is_num(v) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
 
 
+RECORDED = "Recorded "  # the board stamps an answered perk's note "Recorded YYYY-MM-DD: ..."
+PLACEHOLDER = "PLACEHOLDER"  # a note carrying this marks values typed in to be replaced
+_RECORDED_ON = re.compile(r"Recorded (\d{4}-\d{2}-\d{2})")
+
+
+@dataclass
+class PerkState:
+    """Where a perk's values stand, read off its note: the one place that does."""
+
+    recorded: bool  # answered on the board (or by `penny set`)
+    recorded_on: str  # its date, when the note carries one
+    placeholder: bool  # typed in to be replaced
+
+
+def perk_state(p: dict) -> PerkState:
+    note = str(p.get("note", ""))
+    on = _RECORDED_ON.match(note)
+    return PerkState(note.startswith(RECORDED), on.group(1) if on else "", PLACEHOLDER in note)
+
+
 # --------------------------------------------------------------------------
 # Picking the verdict a membership is judged by
 
@@ -224,10 +244,11 @@ def derive(
         for pkey, p in _perks(assumptions, mkey).items():
             lo, base, hi = (float(p[lvl]) for lvl in LEVELS)
             note = str(p.get("note", ""))
+            st = perk_state(p)
             section = f"{mkey}.{pkey}"
             plabel = perk_label(rules, mkey, pkey)
             n_lo, n_hi = net - base + lo, net - base + hi
-            data = {"section": section, "membership": mkey, "low": lo, "base": base, "high": hi, "note": note, "net": net, "fee": verdicts[headline_key(rules, mkey)].fee, "label": plabel, "mlabel": mlabel, "flips": n_lo < 0 <= n_hi, "recorded": note.startswith("Recorded ")}
+            data = {"section": section, "membership": mkey, "low": lo, "base": base, "high": hi, "note": note, "net": net, "fee": verdicts[headline_key(rules, mkey)].fee, "label": plabel, "mlabel": mlabel, "flips": n_lo < 0 <= n_hi, "recorded": st.recorded}
             data.update({k: str(p[k]) for k in PROMPTS if k in p})
             if "measured_if" in p and _is_num(p.get("measured")):
                 data["measured"] = float(p["measured"])
@@ -242,9 +263,9 @@ def derive(
                 f"{mlabel} net, base: {signed(net)}. With {plabel} at its low {signed(n_lo)}, at its high {signed(n_hi)}.",
                 f"Note in the file: {note}" if note else "No note in the file.",
             ]
-            if "PLACEHOLDER" in note:
+            if st.placeholder:
                 out.append(Decision(f"perk:{section}", f"Replace the {plabel} placeholder", mkey, "placeholder", perk_swing(rules, assumptions, spend, annualize, mkey, pkey), explain, src, "perk", sub=f"{mlabel} · assumptions.toml [{section}] is a placeholder at {num(lo)} / {num(base)} / {num(hi)}", data=data))
-            elif base == 0 and hi > 0 and not note.startswith("Recorded "):
+            elif base == 0 and hi > 0 and not st.recorded:
                 out.append(Decision(f"perk:{section}", f"{mlabel} {plabel}: what is it worth to you?", mkey, "choice", perk_swing(rules, assumptions, spend, annualize, mkey, pkey, "base", "high"), explain, src, "perk", sub=f"{mlabel} · [{section}] is {num(lo)} / {num(base)} / {num(hi)}; base 0 counts it as worth nothing to you", data=data))
             elif lo == base == hi == 0 and not data["recorded"]:
                 zero.append(data)
@@ -443,7 +464,7 @@ def verdict_line(rules: dict, assumptions: dict, v: model.Verdict) -> tuple[str,
     perks = _perks(assumptions, mkey)
     terms = net_terms(rules, v)
     against = f"{_and(terms)} against the {usd(v.fee)} fee: {signed(base)}" if terms else f"nothing offsets the {usd(v.fee)} fee: {signed(base)}"
-    valued = any(float(p[lvl]) for p in perks.values() for lvl in LEVELS) or any(str(p.get("note", "")).startswith("Recorded ") for p in perks.values())
+    valued = any(float(p[lvl]) for p in perks.values() for lvl in LEVELS) or any(perk_state(p).recorded for p in perks.values())
     if not valued and base < 0:
         return "keep or drop: can't tell", "neutral", f"No perk has a value yet; {against}."
     if round(lo) == round(hi):  # nothing uncertain left to range over
@@ -505,9 +526,8 @@ def net_lines(rules: dict, assumptions: dict, v: model.Verdict) -> list[tuple[st
         if not round(base):
             zero.append(label)
             continue
-        note = str(p.get("note", ""))
-        rec = re.match(r"Recorded (\d{4}-\d{2}-\d{2})", note)
-        mark = "placeholder" if "PLACEHOLDER" in note else f"recorded {rec.group(1)}" if rec else ""
+        st = perk_state(p)
+        mark = "placeholder" if st.placeholder else f"recorded {st.recorded_on}" if st.recorded_on else ""
         out.append((label[:1].upper() + label[1:], base, mark))
     if zero:
         s = _and(zero)

@@ -269,17 +269,25 @@ def evaluate(
     return out
 
 
-def point_values(rules: dict, assumptions: dict) -> dict[str, float]:
-    """The baseline card's value per point at low / base / high, in $/pt.
+def point_range(rules: dict, assumptions: dict, ckey: str | None = None) -> dict[str, float]:
+    """A card's value per point at low / base / high, in $/pt: the baseline's
+    when no ``ckey`` is given. The one place a ¢/pt range is read.
 
     Base is the card's own ``default_rate`` (its 1x rate *is* the ¢/pt), so the
     board's ¢/pt Record stays the one place base is set. Low and high come from
-    assumptions.toml ``[point_value.<baseline card>]``; absent, both equal base.
+    assumptions.toml ``[point_value.<card>]``; absent, both equal base. A card
+    whose points pool into another (``points_of``) is worth that card's range.
     """
-    bkey = rules["held"]["baseline_card"]
-    base = float(rules["cards"][bkey].get("default_rate", 0.0))
-    rng = assumptions.get("point_value", {}).get(bkey, {})
+    ckey = ckey or rules["held"]["baseline_card"]
+    ckey = rules["cards"][ckey].get("points_of", ckey)
+    base = float(rules["cards"][ckey].get("default_rate", 0.0))
+    rng = assumptions.get("point_value", {}).get(ckey, {})
     return {"low": float(rng.get("low", base)), "base": base, "high": float(rng.get("high", base))}
+
+
+def point_values(rules: dict, assumptions: dict) -> dict[str, float]:
+    """The baseline card's ``point_range``."""
+    return point_range(rules, assumptions)
 
 
 def scaled_card(card: dict, cpp: float) -> dict:

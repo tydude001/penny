@@ -33,7 +33,7 @@ from pathlib import Path
 
 from . import load as ld
 from .load import Txn
-from .model import LEVELS, capped, card_rate, scaled_card, spend_by_family
+from .model import LEVELS, capped, card_rate, point_range, scaled_card, spend_by_family
 
 # ---------------------------------------------------------------------------
 # Credit detection
@@ -174,12 +174,8 @@ def worth_spend(txns: list[Txn], rules: dict, ckey: str) -> dict[str, float]:
 
 
 def card_point_values(rules: dict, assumptions: dict, ckey: str) -> dict[str, float]:
-    """A card's $/pt at low / base / high: base is its ``default_rate``, low/high
-    from ``[point_value.<card>]``; a card with no range is the same at all three."""
-    ckey = rules["cards"][ckey].get("points_of", ckey)  # pooled points are the pool card's
-    base = float(rules["cards"][ckey].get("default_rate", 0.0))
-    rng = assumptions.get("point_value", {}).get(ckey, {})
-    return {"low": float(rng.get("low", base)), "base": base, "high": float(rng.get("high", base))}
+    """``model.point_range`` for one card."""
+    return point_range(rules, assumptions, ckey)
 
 
 def benefits(assumptions: dict, ckey: str) -> dict[str, dict]:

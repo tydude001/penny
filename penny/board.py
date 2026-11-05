@@ -526,8 +526,8 @@ def record(cfg: Config, payload, today: date | None = None, now: datetime | None
             path = paths[w.file]
             old, text = new_text.get(w.file) or (path.read_text(),) * 2
             value = w.value
-            if w.file == "assumptions" and w.key == "note" and not value.startswith("Recorded "):
-                value = f"Recorded {today.isoformat()}: {value.strip()}"
+            if w.file == "assumptions" and w.key == "note" and not value.startswith(worth.RECORDED):
+                value = f"{worth.RECORDED}{today.isoformat()}: {value.strip()}"
             try:
                 # rules.toml is the instance, read over the defaults: the value
                 # in force is the merged one, and a key only the defaults have
