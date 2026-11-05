@@ -1588,10 +1588,15 @@ def _zero_perks_text(rules: dict, v: model.Verdict, ps: list[dict]) -> tuple[str
     return title, why, how, line, word, quick
 
 
+def _verdicts(s: State) -> dict:
+    """The state's verdicts: worked out at load, or now for a hand-built State."""
+    return s.analysis.verdicts if s.analysis else by_key(model.evaluate(s.rules, s.assumptions, s.spend, s.window.annualize))
+
+
 def plan(s: State) -> list[Item]:
     """Sort every decision into a page group and put it into words."""
     rules, today = s.rules, s.today
-    verdicts = by_key(model.evaluate(rules, s.assumptions, s.spend, s.window.annualize))
+    verdicts = _verdicts(s)
     rows = {r.membership: r for r in s.verdicts}
     cards, mems = rules.get("cards", {}), rules.get("memberships", {})
     labels = _labels(rules)
@@ -1976,18 +1981,9 @@ def view(s: State) -> View:
             it.form = f"<p><a class=btn href='/cards/{escape(bkey)}#cpp'>Change it on the card's page ›</a></p>"
     items.sort(key=lambda i: GROUPS[i.group])
     numbered = [i for i in items if i.group in ("ask", "check")]
-    margin = worth_margin(s.worth)
-    alts = s.assumptions.get("card_worth", {}).get("alternatives", [])
-    flip = flip_point(rules, s.assumptions, s.carried.get(alts[0], {})) if margin else None
-    # The margin's low end takes benefits at their low too, so it can straddle
-    # zero with no ¢/pt in the range flipping it; then say where it would.
-    even = flip_point(rules, s.assumptions, s.carried.get(alts[0], {}), lo=0.001) if margin and not flip and margin["low"] < 0 <= margin["high"] else None
-    return View(
-        s, items, {it.key: n for n, it in enumerate(numbered, 1)},
-        card_rows(rules, s.assumptions, s.spend, s.window.annualize, s.worth, s.today),
-        swipe_rows(rules, s.spend, s.window.annualize, s.today), margin, flip,
-        by_key(model.evaluate(rules, s.assumptions, s.spend, s.window.annualize)), _labels(rules), even,
-    )
+    c = s.analysis.cards if s.analysis else worth.card_side(rules, s.assumptions, s.spend, s.window.annualize, s.worth, s.carried, s.today)
+    return View(s, items, {it.key: n for n, it in enumerate(numbered, 1)}, c.cards, c.swipe, c.margin, c.flip,
+                _verdicts(s), _labels(rules), c.even)
 
 
 def _meta(s: State) -> str:

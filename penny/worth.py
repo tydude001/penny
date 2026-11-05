@@ -85,14 +85,12 @@ def swing(rules: dict, assumptions: dict, spend: dict, annualize: float, frm, to
 
 
 def perk_swing(rules: dict, assumptions: dict, spend: dict, annualize: float, mkey: str, pkey: str, frm: str = "low", to: str = "high") -> float:
-    def at(level):
-        def mutate(r, a):
-            p = a[mkey][pkey]
-            p["base"] = p[level]
-
-        return mutate
-
-    return swing(rules, assumptions, spend, annualize, at(frm), at(to), headline_key(rules, mkey))[0]
+    """What moving one perk's base from its ``frm`` value to its ``to`` value
+    does to the membership's headline net. A perk adds straight into net
+    (``model.Verdict``), so that is the difference of the two values; no
+    re-evaluation needed. The other arguments are kept for the callers."""
+    p = assumptions[mkey][pkey]
+    return float(p[to]) - float(p[frm])
 
 
 def rate_multiples(card: dict) -> dict[str, float]:
@@ -587,13 +585,10 @@ def flip_point(rules: dict, assumptions: dict, spend: dict[str, float], lo: floa
     f_lo, f_hi = margin_at(rules, assumptions, spend, lo), margin_at(rules, assumptions, spend, hi)
     if lo == hi or (f_lo < 0) == (f_hi < 0):
         return None
-    for _ in range(60):
-        mid = (lo + hi) / 2
-        if (margin_at(rules, assumptions, spend, mid) < 0) == (f_lo < 0):
-            lo = mid
-        else:
-            hi = mid
-    return (lo + hi) / 2
+    # Every rate of the card scales with its ¢/pt (caps included: the share
+    # under a cap depends on spend alone), and nothing else in the margin
+    # does, so the margin is a straight line in ¢/pt: two points solve it.
+    return lo + f_lo * (hi - lo) / (f_lo - f_hi)
 
 
 def card_rows(rules: dict, assumptions: dict, spend: dict[str, float], annualize: float, worth: list[cardworth.Worth] | None = None, today: date | None = None, verdicts: dict | None = None) -> list[CardRow]:
@@ -823,15 +818,42 @@ def load(root: Path, rules: dict, assumptions: dict, export: Path | None = None,
 
 
 @dataclass
+class CardSide:
+    """The card verdicts: one row per card, where to swipe, and card worth's
+    margin with the ¢/pt where it flips."""
+
+    cards: list[CardRow]
+    swipe: list[SwipeRow]
+    margin: dict[str, float] | None  # the first card-worth alternative over the second
+    flip: float | None  # $/pt where that margin crosses zero, inside [point_value]
+    even: float | None  # the same crossing searched down to 0.1¢, when it lies below the range
+
+
+def card_side(rules: dict, assumptions: dict, spend: dict[str, float], annualize: float, worth: list[cardworth.Worth],
+              carried: dict[str, dict[str, float]], today: date | None, verdicts: dict | None = None) -> CardSide:
+    margin = worth_margin(worth)
+    alts = assumptions.get("card_worth", {}).get("alternatives", [])
+    flip = flip_point(rules, assumptions, carried.get(alts[0], {})) if margin else None
+    # The margin's low end takes benefits at their low too, so it can straddle
+    # zero with no ¢/pt in the range flipping it; then say where it would.
+    even = flip_point(rules, assumptions, carried.get(alts[0], {}), lo=0.001) if margin and not flip and margin["low"] < 0 <= margin["high"] else None
+    return CardSide(card_rows(rules, assumptions, spend, annualize, worth, today, verdicts=verdicts),
+                    swipe_rows(rules, spend, annualize, today), margin, flip, even)
+
+
+@dataclass
 class Analysis:
     """The verdicts, worked out once, and everything derived from them."""
 
     verdicts: dict[tuple[str, str, bool], model.Verdict]
     decisions: list[Decision]
     rows: list[VerdictRow]
+    cards: CardSide
 
 
 def analyze(i: Inputs, wiki: list[WikiRow] | None = None, today: date | None = None, root: Path | None = None) -> Analysis:
-    verdicts = by_key(model.evaluate(i.rules, i.assumptions, i.spend, i.window.annualize))
-    decisions = rank(derive(i.rules, i.assumptions, i.spend, i.window.annualize, i.found, wiki, today, root, i.measures, verdicts=verdicts))
-    return Analysis(verdicts, decisions, verdict_rows(i.rules, i.assumptions, i.spend, i.window.annualize, verdicts=verdicts))
+    r, a, sp, k = i.rules, i.assumptions, i.spend, i.window.annualize
+    verdicts = by_key(model.evaluate(r, a, sp, k))
+    decisions = rank(derive(r, a, sp, k, i.found, wiki, today, root, i.measures, verdicts=verdicts))
+    return Analysis(verdicts, decisions, verdict_rows(r, a, sp, k, verdicts=verdicts),
+                    card_side(r, a, sp, k, i.worth, i.carried, today, verdicts))
