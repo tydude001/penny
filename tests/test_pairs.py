@@ -208,3 +208,107 @@ def test_penny_pairs_without_a_pairing_file_says_what_it_needs(tmp_path):
     (tmp_path / "rules.toml").write_text((INSTANCE / "rules.toml").read_text())
     with pytest.raises(SystemExit, match="costco-pairs.toml"):
         cli.main(["--home", str(tmp_path), "pairs"])
+
+
+# -- coverage, price age, by weight -------------------------------------------
+
+def test_coverage_counts_priced_pairs_against_the_year_skipped_items_aside(tmp_path):
+    receipts = RECEIPTS + [_receipt("D", "2026-05-01", [_line("50", "MONITOR", 200.0), _line("60", "CHICKEN BITES", 40.0)])]
+    m = _measure('skip = ["50"]\n' + PAIRS, receipts=receipts, tmp_path=tmp_path)  # top level: before the first [[pair]]
+    # Year: beef 55, paper 48, soda 15, seltzer 9, chicken bites 40; the monitor skipped.
+    assert m.total == pytest.approx(55 + 48 + 15 + 9 + 40)
+    assert m.coverage == pytest.approx((55 + 48 + 15) / m.total)  # seltzer is paired but unpriced
+    assert [(it.item_number, a) for it, a in m.unpaired] == [("60", 40.0)]
+    assert "cover 71% of your $167 a year at Costco; biggest unpaired: Chicken Bites $40." in m.summary()
+
+
+def test_the_walmart_price_is_the_median_of_recent_orders(tmp_path):
+    orders = [_order(f"o{i}", d, [{"type": "REGULAR", "items": [_item("w10", "Beef", p, unit=f"${p:.2f}/lb")]}])
+              for i, (d, p) in enumerate([("2025-06-01", 2.0), ("2026-01-01", 9.0), ("2026-02-01", 7.0), ("2026-03-01", 8.0)])]
+    beef = next(r for r in _measure(orders=orders, tmp_path=tmp_path).rows if r.name == "Beef")
+    assert beef.walmart_unit == 8.0  # 7, 8, 9 within 180 days of 03-01; June's $2 is too old to count
+    assert beef.walmart_from == "median of 3 orders to 2026-03-01" and beef.price_on == date(2026, 3, 1)
+    assert beef.stale  # 91 days before the last receipt, 05-31
+    orders = orders[:2] + [_order("o9", "2026-04-01", [{"type": "REGULAR", "items": [_item("w10", "Beef", 6.0, unit="$6.00/lb")]}])]
+    beef = next(r for r in _measure(orders=orders, tmp_path=tmp_path).rows if r.name == "Beef")
+    assert not beef.stale and beef.walmart_unit == 7.5  # 9 and 6: an even count takes the middle two
+
+
+def test_a_newer_checked_price_replaces_a_stale_order(tmp_path):
+    text = PAIRS.replace('walmart = ["w10"]', 'walmart = ["w10"]\nwalmart_price = 9.5\nwalmart_price_on = "2026-05-01"')
+    beef = next(r for r in _measure(text, tmp_path=tmp_path).rows if r.name == "Beef")
+    assert (beef.walmart_unit, beef.walmart_from, beef.stale) == (9.5, "walmart.com, 2026-05-01", False)
+    older = text.replace('"2026-05-01"', '"2025-12-01"')  # older than the 2026-02-01 order: the order wins
+    beef = next(r for r in _measure(older, tmp_path=tmp_path).rows if r.name == "Beef")
+    assert beef.walmart_unit == 8.0
+
+
+def test_an_item_sold_by_weight_counts_pounds_off_the_shelf_price(tmp_path):
+    receipts = [_receipt("A", "2026-05-31", [_line("70", "BNLS/SL BRST", 29.90, price=2.99), _line("70", "BNLS/SL BRST", 14.95, price=2.99)])]
+    text = 'perk = "costco.prices"\n[[pair]]\nname = "Chicken"\nunit = "lb"\ncostco = { 70 = "by weight" }\nwalmart_price = 4.0\n'
+    m = _measure(text, receipts=receipts, tmp_path=tmp_path)
+    r = m.rows[0]
+    assert r.bought / m.scale == pytest.approx(15.0)  # 10 lb + 5 lb
+    from penny import costco
+    it = costco.rank(costco.receipts(receipts))[0]
+    assert it.by_weight and it.weight == pytest.approx(15.0)
+    assert not costco.rank(costco.receipts(RECEIPTS))[0].by_weight
+
+
+# -- suggestions -------------------------------------------------------------
+
+def test_abbreviations_match_but_a_word_with_vowels_must_match_its_start():
+    assert pairs._same("brst", "breast") and pairs._same("bnls", "boneless") and pairs._same("choc", "chocolate")
+    assert not pairs._same("cut", "crust") and not pairs._same("gel", "ghirardelli")
+    assert pairs._words("SUNCHIPS VTY VTY P48 T12H4") == ["sunchips", "vty"]
+
+
+def _suggest(tmp_path, receipts, orders, text=PAIRS):
+    from penny import walmart
+    m = _measure(text, receipts=receipts, orders=orders, tmp_path=tmp_path)
+    return pairs.suggest(m, pairs.load(tmp_path / pairs.FILE), walmart.lines_from_capture(orders))
+
+
+def test_suggest_matches_by_name_and_merges_item_numbers_of_one_product(tmp_path):
+    receipts = RECEIPTS + [_receipt("E", "2026-05-01", [
+        _line("80", "BNLS/SL BRST", 29.90, price=2.99), _line("81", "BNLS BREAST", 20.0, price=2.99),
+        _line("90", "KS SPARKLING 35/12OZ LIME", 12.0), _line("95", "THICK CUT", 9.0)])]
+    orders = ORDERS + [_order("o3", "2026-04-01", [{"type": "REGULAR", "items": [
+        _item("w80", "Fresh Boneless Chicken Breast", 9.0, unit="$4.50/lb"),
+        _item("w90", "Lime Sparkling Water, 12 fl oz Cans, 8 / Pack", 4.0),
+        _item("w95", "Classic Pizza Crust, Thin Cut Style", 3.0)]}])]
+    found = _suggest(tmp_path, receipts, orders)
+    by = {sg.candidates[0].item_id: sg for sg in found}
+    assert set(by) == {"w80", "w90"}  # "THICK CUT" shares one word with the crust: not enough
+    chicken = by["w80"]
+    assert [it.item_number for it, _ in chicken.items] == ["80", "81"] and chicken.annual == pytest.approx(49.90)
+    assert 'costco = { 80 = "by weight", 81 = "by weight" }' in chicken.toml() and 'walmart = ["w80"]' in chicken.toml()
+    water = by["w90"].toml()
+    assert "costco = { 90 = 35 }" in water and "walmart = { w90 = 8 }" in water
+    (tmp_path / "check.toml").write_text('perk = "costco.prices"\n' + chicken.toml() + "\n" + by["w90"].toml() + "\n")
+    assert len(pairs.load(tmp_path / "check.toml")["pairs"]) == 2  # what it prints pastes as is
+
+
+def test_a_size_it_cannot_read_is_zero_so_the_file_refuses_it(tmp_path):
+    receipts = RECEIPTS + [_receipt("E", "2026-05-01", [_line("85", "GRANOLA BARS VTY", 12.0)])]
+    orders = ORDERS + [_order("o3", "2026-04-01", [{"type": "REGULAR", "items": [_item("w85", "Granola Bars Variety", 4.0)]}])]
+    (sg,) = _suggest(tmp_path, receipts, orders)
+    assert "85 = 0 }" in sg.toml() and "fill in" in sg.toml()
+    (tmp_path / "check.toml").write_text('perk = "costco.prices"\n' + sg.toml() + "\n")
+    with pytest.raises(ValueError, match="above 0"):
+        pairs.load(tmp_path / "check.toml")
+
+
+def test_penny_pairs_suggest_prints_blocks_and_the_misses(tmp_path, capsys):
+    shutil.copy(INSTANCE / "rules.toml", tmp_path / "rules.toml")
+    (tmp_path / "data").mkdir()
+    receipts = RECEIPTS + [_receipt("E", "2026-05-01", [_line("80", "BNLS/SL BRST", 29.90, price=2.99), _line("99", "MYSTERY", 5.0)])]
+    orders = ORDERS + [_order("o3", "2026-04-01", [{"type": "REGULAR", "items": [_item("w80", "Boneless Chicken Breast", 9.0, unit="$4.50/lb")]}])]
+    (tmp_path / "data" / "costco-receipts-2026-06-01.json").write_text(json.dumps(receipts))
+    (tmp_path / "data" / "walmart-orders-2026-06-01.json").write_text(json.dumps(orders))
+    (tmp_path / pairs.FILE).write_text(PAIRS)
+    cli.main(["--home", str(tmp_path), "pairs", "--suggest"])
+    out = capsys.readouterr().out
+    assert "coverage: the priced pairs are" in out
+    assert "# BNLS/SL BRST: $30 a year at Costco" in out and 'walmart = ["w80"]' in out
+    assert "no Walmart match: MYSTERY [99]" in out

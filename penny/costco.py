@@ -41,6 +41,8 @@ class Item:
     units: float = 0.0
     spend: float = 0.0  # net of coupons
     shelf_price: float = 0.0  # itemUnitPriceAmount from the latest trip, before coupons
+    weight: float = 0.0  # amount / itemUnitPriceAmount summed: pounds, for an item sold by weight
+    by_weight: bool = False  # a line's amount was not its units x shelf price
     last: date | None = None
     _seen: set = field(default_factory=set, repr=False)
 
@@ -82,8 +84,12 @@ def rank(raw: list[dict], since: date | None = None) -> list[Item]:
             num = str(ln.get("itemNumber") or "")
             name = " ".join(s.strip() for s in (ln.get("itemDescription01"), ln.get("itemDescription02")) if s)
             it = items.setdefault(num, Item(num, name))
-            it.units += float(ln.get("unit") or 0)
-            it.spend += float(ln.get("amount") or 0)
+            units, amount, shelf = float(ln.get("unit") or 0), float(ln.get("amount") or 0), float(ln.get("itemUnitPriceAmount") or 0)
+            it.units += units
+            it.spend += amount
+            if shelf > 0:
+                it.weight += amount / shelf
+                it.by_weight |= abs(amount - units * shelf) > 0.01
             it._seen.add(r["transactionBarcode"])
             it.trips = len(it._seen)
             if it.last is None or when >= it.last:

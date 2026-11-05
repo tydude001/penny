@@ -206,12 +206,35 @@ def cmd_pairs(args):
     for r in sorted(m.rows, key=lambda r: -(r.saving if r.saving is not None else float("-inf"))):
         cu = _unit_price(r.costco_unit, r.unit) if r.costco_unit else "not bought"
         wu = _unit_price(r.walmart_unit, r.unit) if r.walmart_unit is not None else "-"
-        rows.append([r.name[:30], f"{r.bought:,.0f} {r.unit}", report.money(r.paid), cu, wu, r.walmart_from[:60],
+        rows.append([r.name[:30], f"{r.bought:,.0f} {r.unit}", report.money(r.paid), cu, wu, r.walmart_from[:60] + (" (stale)" if r.stale else ""),
                      report.money(r.saving) if r.saving is not None else "unpriced"])
     print(report.table(["pair", "a year", "paid", "Costco", "Walmart", "Walmart price from", "saving"], rows))
     print(f"total {report.money(m.saving)} a year over {len(m.priced)} priced pairs, after the "
           f"{(m.walmart_rate - m.costco_rate) * 100:.3g}% more the best held card earns at Walmart "
           f"({m.walmart_rate * 100:.3g}% vs {m.costco_rate * 100:.3g}%). The board offers it as [{m.perk}]'s measured answer.")
+    if any(r.stale for r in m.priced):
+        print(f"  (stale): the Walmart price is over {pairs.STALE_DAYS} days older than the last receipt; "
+              "a walmart_price with a newer walmart_price_on replaces it")
+    print(f"coverage: the priced pairs are {report.money(sum(r.paid for r in m.priced))} of {report.money(m.total)} a year "
+          f"at Costco ({m.coverage:.0%}); the total is a floor until the rest is paired or skipped")
+    if m.unpaired and not args.suggest:
+        print("biggest unpaired: " + ", ".join(f"{it.name[:32].strip()} [{it.item_number}] {report.money(a)}" for it, a in m.unpaired[:args.top]))
+        print("  penny pairs --suggest proposes Walmart matches for them")
+    if args.suggest:
+        spec = pairs.load(args.home / pairs.FILE)
+        wpath = next((p for p in m.sources if p.name.startswith("walmart-")), None)
+        found = pairs.suggest(m, spec, walmart.load_lines(wpath) if wpath else [], top=args.top)
+        if not found:
+            print(f"no Walmart item's name matches any of the {args.top} biggest unpaired Costco items")
+        for sg in found:
+            names = " + ".join(it.name.strip() for it, _ in sg.items)
+            print(f"\n# {names}: {report.money(sg.annual)} a year at Costco. Check the match and sizes before pasting.")
+            print(sg.toml())
+        matched = {it.item_number for sg in found for it, _ in sg.items}
+        unmatched = [it for it, _ in m.unpaired[:args.top] if it.item_number not in matched]
+        if unmatched:
+            print("\nno Walmart match: " + ", ".join(f"{it.name[:32].strip()} [{it.item_number}]" for it in unmatched)
+                  + f"; pair by hand or add to skip in {pairs.FILE}")
 
 
 def cmd_board(args):
@@ -470,6 +493,8 @@ def main(argv=None):
     s.add_argument("--top", type=int, default=30)
     s.set_defaults(fn=cmd_costco)
     s = sub.add_parser("pairs", help="what Costco saves you against Walmart on the items costco-pairs.toml pairs, from both stores' newest captures")
+    s.add_argument("--suggest", action="store_true", help="propose [[pair]] blocks for the biggest unpaired Costco items, to check and paste")
+    s.add_argument("--top", type=int, default=8, help="how many unpaired items to list or suggest for")
     s.set_defaults(fn=cmd_pairs)
     s = sub.add_parser("board", help="serve the decision board; Record writes into rules.toml / assumptions.toml")
     s.add_argument("--export", help="run on a Rocket Money export CSV instead of the Plaid + Apple feed")

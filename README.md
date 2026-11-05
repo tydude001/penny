@@ -102,8 +102,10 @@ For each membership, per year:
   advantage can be measured instead: with captures of both stores' order
   history and a `costco-pairs.toml` naming which Costco item replaces which
   Walmart product, `penny pairs` prices what you bought at Costco at
-  Walmart's prices, and the board offers that total as the answer
-  (`penny/pairs.py` has the file format).
+  Walmart's prices, says how much of your Costco spend the pairs cover, and
+  the board offers that total as the answer. `penny pairs --suggest`
+  proposes pairs for the biggest unpaired items (`penny/pairs.py` has the
+  file format).
 - **fee** — the list fee from `rules.toml`; the fee actually charged in the
   window is printed beside it, flagged when it is off every list fee by more
   than $1 or 5%, whichever is larger.
