@@ -98,7 +98,12 @@ For each membership, per year:
   one the membership enables — Costco's 2% does not pay on gasoline.
 - **perks** — hand-estimated value of shipping, delivery, RxPass, price
   advantage, from `assumptions.toml` at low / base / high. Zero until you
-  fill them in, so the first report is pure cash-back math.
+  fill them in, so the first report is pure cash-back math. Costco's price
+  advantage can be measured instead: with captures of both stores' order
+  history and a `costco-pairs.toml` naming which Costco item replaces which
+  Walmart product, `penny pairs` prices what you bought at Costco at
+  Walmart's prices, and the board offers that total as the answer
+  (`penny/pairs.py` has the file format).
 - **fee** — the list fee from `rules.toml`; the fee actually charged in the
   window is printed beside it, flagged when it is off every list fee by more
   than $1 or 5%, whichever is larger.

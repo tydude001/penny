@@ -64,13 +64,16 @@ def summary(raw: list[dict]) -> list[Receipt]:
             for r in raw]
 
 
-def rank(raw: list[dict]) -> list[Item]:
-    """Warehouse items by net spend, biggest first."""
+def rank(raw: list[dict], since: date | None = None) -> list[Item]:
+    """Warehouse items by net spend, biggest first; with ``since``, only
+    receipts from that day on."""
     items: dict[str, Item] = {}
     for r in raw:
         if r.get("receiptType") != WAREHOUSE:
             continue
         when = date.fromisoformat(str(r["transactionDate"])[:10])
+        if since and when < since:
+            continue
         lines = r.get("itemArray") or []
         coupons = [ln for ln in lines if str(ln.get("itemDescription01") or "").startswith("/")]
         for ln in lines:

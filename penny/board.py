@@ -50,6 +50,7 @@ from . import (
     home,
     model,
     networth,
+    pairs,
     recurring,
     statements,
     tomledit,
@@ -317,9 +318,12 @@ def derive(
     wiki: list[WikiRow] | None = None,
     today: date | None = None,
     root: Path | None = None,
+    measures: list[pairs.Measure] | None = None,
 ) -> list[Decision]:
     """Every unresolved input, in no particular order (``rank`` orders them).
-    ``spend`` is the window's spend by family, as ``model.evaluate`` takes it."""
+    ``spend`` is the window's spend by family, as ``model.evaluate`` takes it.
+    ``measures`` are perks penny worked out from the stores' own captures
+    (``pairs``): each is offered as the perk's measured answer."""
     today = today or datetime.now().astimezone().date()
     verdicts = by_key(model.evaluate(rules, assumptions, spend, annualize))
     labels = _labels(rules)
@@ -344,6 +348,12 @@ def derive(
             data.update({k: str(p[k]) for k in PROMPTS if k in p})
             if "measured_if" in p and _is_num(p.get("measured")):
                 data["measured"] = float(p["measured"])
+            mm = next((m for m in measures or [] if m.perk == section and m.priced), None)
+            if mm:
+                # Worked out from the captures on every load: it replaces any
+                # hand-typed measured / measured_if, which goes stale.
+                data.update(measured=float(round(mm.saving)), measured_if="What your receipts show", how=mm.summary(),
+                            receipts={"items": len(mm.priced), "last": mm.last.isoformat(), "partial": mm.partial})
             src = {"file": "assumptions.toml", "section": section, "keys": list(LEVELS) + ["note"]}
             explain = [
                 f"{mlabel} net, base: {signed(net)}. With {plabel} at its low {signed(n_lo)}, at its high {signed(n_hi)}.",
@@ -625,12 +635,7 @@ def net_lines(rules: dict, assumptions: dict, v: model.Verdict) -> list[tuple[st
 # rules.toml, the model and cardworth on every GET; nothing new is stored.
 
 
-def accepts(rules: dict, family: str, card: dict) -> bool:
-    """Whether the store behind ``family`` takes ``card``: a family's optional
-    ``networks`` list (Costco: Visa only) against the card's ``network``.
-    Either key absent means yes."""
-    nets = rules.get("families", {}).get(family, {}).get("networks")
-    return not nets or "network" not in card or card["network"] in nets
+accepts = model.accepts
 
 
 def usable_spend(rules: dict, card: dict, spend: dict[str, float]) -> dict[str, float]:
@@ -1047,7 +1052,7 @@ def _state_key(cfg: Config, today: date) -> tuple:
     key = [today, *(_stat(p) for p in (cfg.rules, home.DEFAULT_RULES, cfg.assumptions, cfg.wiki, cfg.export, cfg.root / feed.OVERRIDES, cfg.root / feed.MERCHANTS))]
     if cfg.export is None:
         key += [_scan(data / "plaid" / "production"), _scan(data / "apple", "*.csv"), _scan(data / "imports", "*.csv")]
-    key += [_scan(data, "walmart-orders-*.json"), _scan(data, "costco-receipts-*.json"), _dirs(cfg.root / "docs")]
+    key += [_scan(data, "walmart-orders-*.json"), _scan(data, "costco-receipts-*.json"), _stat(cfg.root / pairs.FILE), _dirs(cfg.root / "docs")]
     return tuple(key)
 
 
@@ -1128,7 +1133,8 @@ def _load_state(cfg: Config, today: date) -> State:
         walmart_dropped = before - max(store, 0.0)
     found = model.observed_fees(tx, rules)
     wiki = parse_wiki(cfg.wiki.read_text()) if cfg.wiki and cfg.wiki.is_file() else []
-    decisions = rank(derive(rules, assumptions, spend, w.annualize, found, wiki, today, cfg.root))
+    measures = [m for m in [pairs.for_instance(cfg.root, rules)] if m]
+    decisions = rank(derive(rules, assumptions, spend, w.annualize, found, wiki, today, cfg.root, measures))
     rows = verdict_rows(rules, assumptions, spend, w.annualize)
     receipts = costco.newest_measured(cfg.root / "data") if COSTCO_FAMILY in rules.get("families", {}) else None
     # The card figures, the same way `penny report` works them out: the
@@ -1172,7 +1178,8 @@ def load_feed_state(cfg: Config, rules: dict, assumptions: dict, today: date) ->
                    and measured.first <= t.date <= measured.last)
     found = model.observed_fees(tx, rules)
     wiki = parse_wiki(cfg.wiki.read_text()) if cfg.wiki and cfg.wiki.is_file() else []
-    decisions = rank(derive(rules, assumptions, spend, w.annualize, found, wiki, today, cfg.root))
+    measures = [m for m in [pairs.for_instance(cfg.root, rules)] if m]
+    decisions = rank(derive(rules, assumptions, spend, w.annualize, found, wiki, today, cfg.root, measures))
     rows = verdict_rows(rules, assumptions, spend, w.annualize)
     receipts = costco.newest_measured(cfg.root / "data") if COSTCO_FAMILY in rules.get("families", {}) else None
     annual = lambda sp: model.annualized(sp, w.annualize)
@@ -2236,6 +2243,35 @@ def _verified_inputs(section: str, card: dict, today: date) -> str:
     return out
 
 
+def _zero_perks_text(rules: dict, v: model.Verdict, ps: list[dict]) -> tuple[str, str, str]:
+    """Title, why and how for a membership whose perks are all at zero and
+    whose verdict can't tell. When penny measured one of them from the
+    stores' captures, the title is the answer that measurement gives."""
+    ml, net = ps[0]["mlabel"], ps[0]["net"]
+    counted = [f"the {usd(v.fee)} fee"]
+    if round(v.reward):
+        tier = tier_label(rules.get("memberships", {}).get(v.membership, {}), v.tier)
+        counted.append(f"the {usd(v.reward)} {tier} reward")
+    if round(v.attributable):
+        counted.append(f"{usd(v.attributable)} of card rewards it causes")
+    so_far = f"Counting {_and(counted)}, {ml} nets {signed(net)} a year before any perk"
+    got = [p for p in ps if p.get("receipts")]
+    if not got:
+        why = f"{so_far}, so the verdict can't tell. If what it saves you comes to {usd(-net)} or more a year, it's a keep; less, a drop."
+        how = "Answer the ones that apply. Count what you would pay without the membership, not list prices. An answer of $0 is an answer: it settles the verdict as a drop."
+        return f"Does {ml} save you {usd(-net)} or more a year?", why, how
+    saved = sum(p["measured"] for p in got)
+    after = net + saved
+    r = got[0]["receipts"]
+    n = sum(p["receipts"]["items"] for p in got)
+    through = date.fromisoformat(r["last"])
+    what = f"saves you about {usd(saved)}" if saved >= 0 else f"costs you about {usd(-saved)} more"
+    why = (f"Your receipts say it {what} a year on what you buy there ({n} item{'s' if n != 1 else ''} checked against your Walmart prices, "
+           f"through {through:%b %-d}). {so_far}, so that makes it a {_verdict_word(after)}." + (" Under a year of receipts: a scaled guess." if r["partial"] else ""))
+    how = "Pick what your receipts show to settle it, or put in your own number. Answer the others only if they apply."
+    return f"{ml}: {_verdict_word(after)}, {signed(after)} a year", why, how
+
+
 def plan(s: State) -> list[Item]:
     """Sort every decision into a page group and put it into words."""
     rules, today = s.rules, s.today
@@ -2263,11 +2299,10 @@ def plan(s: State) -> list[Item]:
                 ps = [p for p in d.data["perks"] if p["membership"] == m]
                 if not ps:
                     continue
-                net, ml, fee = ps[0]["net"], ps[0]["mlabel"], ps[0]["fee"]
-                why = f"Nothing is counted for {ml} yet except the {usd(fee)} fee, so it nets {signed(net)} a year and the verdict can't tell. If what it saves you comes to {usd(-net)} or more a year, it's a keep; less, a drop."
-                how = "Answer the ones that apply. Count what you would pay without the membership, not list prices. An answer of $0 is an answer: it settles the verdict as a drop."
+                net, ml = ps[0]["net"], ps[0]["mlabel"]
+                title, why, how = _zero_perks_text(rules, verdicts[headline_key(rules, m)], ps)
                 sub = Decision(f"ask:{m}", f"{ml} perks at zero", m, "defaults", None, d.explain, {"file": "assumptions.toml", "section": ", ".join(p["section"] for p in ps), "keys": list(LEVELS) + ["note"]}, "perks", sub=", ".join(p["label"] for p in ps))
-                items.append(Item(sub.key, "ask", f"Does {ml} save you {usd(-net)} or more a year?", escape(why), escape(how), f"{usd(-net)}/yr", -net, m, _perk_form(ps, net, ml), _saved(sub), sub))
+                items.append(Item(sub.key, "ask", title, escape(why), escape(how), f"{usd(-net)}/yr", -net, m, _perk_form(ps, net, ml), _saved(sub), sub))
             if rest:
                 names = ", ".join(f"{p['mlabel']} {p['label']}" for p in rest)
                 forms = "".join(f"<details><summary>Put a value on {escape(p['mlabel'])} {escape(p['label'])}</summary>{_perk_form([p], p['net'], p['mlabel'])}</details>" for p in rest)

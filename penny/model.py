@@ -108,6 +108,28 @@ def card_rate(card: dict, family: str) -> float:
     return float(card.get("rates", {}).get(family, card.get("default_rate", 0.0)))
 
 
+def accepts(rules: dict, family: str, card: dict) -> bool:
+    """Whether the store behind ``family`` takes ``card``: a family's optional
+    ``networks`` list (Costco: Visa only) against the card's ``network``.
+    Either key absent means yes."""
+    nets = rules.get("families", {}).get(family, {}).get("networks")
+    return not nets or "network" not in card or card["network"] in nets
+
+
+def best_held_rate(rules: dict, family: str) -> tuple[float, str]:
+    """The most any held card (the baseline included) pays at ``family``'s
+    store, among those it takes, and that card's key. Caps and rotating
+    quarters aside: the plain rate."""
+    cards = rules.get("cards", {})
+    bkey = rules["held"]["baseline_card"]
+    held = [bkey] + [k for k in rules["held"].get("cards", []) if k in cards and k != bkey]
+    ok = [k for k in held if accepts(rules, family, cards[k])]
+    if not ok:
+        return 0.0, ""
+    best = max(ok, key=lambda k: (card_rate(cards[k], family), k == bkey))
+    return card_rate(cards[best], family), best
+
+
 def capped(card: dict, spend: dict[str, float]) -> dict:
     """The card with each ``[[cards.X.caps]]`` applied to a year of ``spend``.
     A cap pays the listed rates on the first ``annual`` dollars a year across

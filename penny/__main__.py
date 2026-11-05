@@ -1,4 +1,4 @@
-"""CLI: penny init [DIR], penny inspect|unmatched|families|report|compare EXPORT.csv, penny walmart|costco CAPTURE.json, penny board, penny plaid, penny import apple, penny check
+"""CLI: penny init [DIR], penny inspect|unmatched|families|report|compare EXPORT.csv, penny walmart|costco CAPTURE.json, penny pairs, penny board, penny plaid, penny import apple, penny check
 
 Every file penny keeps is in the instance: --home, else $PENNY_HOME, else ./home."""
 
@@ -22,6 +22,7 @@ from . import (
     feed,
     home,
     model,
+    pairs,
     plaid,
     report,
     tomledit,
@@ -186,6 +187,31 @@ def cmd_costco(args):
     delta = ex["fee"] - gold["fee"]
     print(f"warehouse pre-tax {report.money(sub)}/yr -> Executive reward {report.money(reward)} "
           f"against the {report.money(delta)} upgrade; break-even at {report.money(delta / ex['reward_rate'])}/yr")
+
+
+def _unit_price(v: float, unit: str) -> str:
+    return f"{v * 100:.3g}¢/{unit}" if v < 1 else f"${v:.2f}/{unit}"
+
+
+def cmd_pairs(args):
+    rules = model.resolve_points(_rules(args))
+    m = pairs.for_instance(args.home, rules)
+    if m is None:
+        sys.exit(f"nothing to compare: penny pairs needs {args.home / pairs.FILE} and a data/costco-receipts-*.json "
+                 "(docs: penny/pairs.py says what the file holds)")
+    print(f"{m.perk}: receipts {m.first} -> {m.last} ({m.days} days) from {', '.join(p.name for p in m.sources)}")
+    if m.partial:
+        print(f"  under a year of receipts: each line is this window x{m.scale:.2f}, a guess, not a measurement")
+    rows = []
+    for r in sorted(m.rows, key=lambda r: -(r.saving if r.saving is not None else float("-inf"))):
+        cu = _unit_price(r.costco_unit, r.unit) if r.costco_unit else "not bought"
+        wu = _unit_price(r.walmart_unit, r.unit) if r.walmart_unit is not None else "-"
+        rows.append([r.name[:30], f"{r.bought:,.0f} {r.unit}", report.money(r.paid), cu, wu, r.walmart_from[:60],
+                     report.money(r.saving) if r.saving is not None else "unpriced"])
+    print(report.table(["pair", "a year", "paid", "Costco", "Walmart", "Walmart price from", "saving"], rows))
+    print(f"total {report.money(m.saving)} a year over {len(m.priced)} priced pairs, after the "
+          f"{(m.walmart_rate - m.costco_rate) * 100:.3g}% more the best held card earns at Walmart "
+          f"({m.walmart_rate * 100:.3g}% vs {m.costco_rate * 100:.3g}%). The board offers it as [{m.perk}]'s measured answer.")
 
 
 def cmd_board(args):
@@ -443,6 +469,8 @@ def main(argv=None):
     s.add_argument("capture")
     s.add_argument("--top", type=int, default=30)
     s.set_defaults(fn=cmd_costco)
+    s = sub.add_parser("pairs", help="what Costco saves you against Walmart on the items costco-pairs.toml pairs, from both stores' newest captures")
+    s.set_defaults(fn=cmd_pairs)
     s = sub.add_parser("board", help="serve the decision board; Record writes into rules.toml / assumptions.toml")
     s.add_argument("--export", help="run on a Rocket Money export CSV instead of the Plaid + Apple feed")
     g = s.add_mutually_exclusive_group()
