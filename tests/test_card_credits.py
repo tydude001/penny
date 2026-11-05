@@ -7,7 +7,7 @@ from datetime import date
 
 import pytest
 
-from penny import board, cardworth, report
+from penny import cardworth, report, worth
 from penny.load import Txn
 
 HEADER = "Date,Original Date,Account Type,Account Name,Account Number,Institution Name,Name,Custom Name,Amount,Description,Category,Note,Ignored From,Tax Deductible\n"
@@ -130,7 +130,7 @@ def test_credits_block_is_empty_without_a_section():
 def test_board_ignores_card_credits():
     rules = _rules()
     rules["memberships"] = {}
-    keys = {d.key for d in board.derive(rules, {}, {"other": 100.0}, 1.0, {}, [])}
+    keys = {d.key for d in worth.derive(rules, {}, {"other": 100.0}, 1.0, {}, [])}
     assert not any("card_credits" in k or "travel" in k for k in keys)
 
 

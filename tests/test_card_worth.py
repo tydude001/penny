@@ -8,7 +8,7 @@ from datetime import date
 
 import pytest
 
-from penny import board, cardworth, model, report
+from penny import cardworth, model, report, worth
 from penny.load import Txn
 
 
@@ -139,5 +139,5 @@ def test_block_is_empty_without_a_section():
 
 
 def test_board_ignores_the_card_worth_table():
-    keys = {d.key for d in board.derive(_rules(), _assumptions(), SPEND, 1.0, {}, [])}
+    keys = {d.key for d in worth.derive(_rules(), _assumptions(), SPEND, 1.0, {}, [])}
     assert not any("card_worth" in k or "hotel" in k for k in keys)

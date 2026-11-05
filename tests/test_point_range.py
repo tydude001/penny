@@ -4,7 +4,7 @@ own default_rate, low/high come from assumptions.toml [point_value.<card>]."""
 
 import pytest
 
-from penny import board, model, report
+from penny import model, report, worth
 
 
 def _rules():
@@ -108,5 +108,5 @@ def test_report_block_warns_when_base_outside_range():
 
 def test_board_ignores_the_point_value_table():
     rules, assumptions = _rules(), _assumptions()
-    keys = {d.key for d in board.derive(rules, assumptions, SPEND, 1.0, {}, [])}
+    keys = {d.key for d in worth.derive(rules, assumptions, SPEND, 1.0, {}, [])}
     assert not any("point_value" in k for k in keys)

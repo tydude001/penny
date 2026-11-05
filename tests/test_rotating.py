@@ -5,7 +5,7 @@ from datetime import date
 
 import pytest
 
-from penny import board, model
+from penny import model, worth
 
 
 def _rules():
@@ -64,10 +64,10 @@ def test_card_edge_on_adds_the_quarter_to_the_standing_edge():
 
 def test_swipe_sheet_uses_the_quarter_only_while_it_runs():
     r = _rules()
-    before = {w.family: (w.card, w.until) for w in board.swipe_rows(r, SPEND, 1.0, date(2026, 9, 23))}
+    before = {w.family: (w.card, w.until) for w in worth.swipe_rows(r, SPEND, 1.0, date(2026, 9, 23))}
     assert before["restaurants"] == ("pts", "") and before["groceries"] == ("grocer", "")
     assert before["drugstores"] == ("flex", "")
-    during = {w.family: w for w in board.swipe_rows(r, SPEND, 1.0, date(2026, 10, 2))}
+    during = {w.family: w for w in worth.swipe_rows(r, SPEND, 1.0, date(2026, 10, 2))}
     assert during["restaurants"].card == "flex" and during["restaurants"].rate == pytest.approx(0.10)
     assert during["restaurants"].until == "to $1,500 a quarter, through Dec 31"
     assert during["groceries"].card == "flex"
@@ -75,6 +75,6 @@ def test_swipe_sheet_uses_the_quarter_only_while_it_runs():
 
 def test_card_rows_count_the_quarter_as_bonus():
     r = _rules()
-    row = next(x for x in board.card_rows(r, {}, SPEND, 1.0, today=date(2026, 9, 23)) if x.key == "flex")
+    row = next(x for x in worth.card_rows(r, {}, SPEND, 1.0, today=date(2026, 9, 23)) if x.key == "flex")
     assert row.edge == pytest.approx(4 + 40 + 40)
     assert row.bonus == pytest.approx(row.edge) and row.default_part == pytest.approx(0)

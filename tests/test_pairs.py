@@ -12,7 +12,7 @@ from test_costco import _line, _receipt
 from test_walmart import _item, _order
 
 from penny import __main__ as cli
-from penny import board, home, model, pairs
+from penny import board, home, model, pairs, worth
 
 RULES = {
     "held": {"baseline_card": "flat", "cards": ["flat", "store"]},
@@ -154,7 +154,7 @@ def _instance_rules():
 
 def test_derive_offers_the_measurement_over_a_hand_typed_one(tmp_path):
     m = _measure(tmp_path=tmp_path)
-    ds = board.derive(_instance_rules(), ASSUMPTIONS, {"costco": 3000.0}, 1.0, {}, [], date(2026, 6, 1), None, [m])
+    ds = worth.derive(_instance_rules(), ASSUMPTIONS, {"costco": 3000.0}, 1.0, {}, [], date(2026, 6, 1), None, [m])
     perks = {p["section"]: p for d in ds if d.key == "perks:zero" for p in d.data["perks"]}
     prices = perks["costco.prices"]
     assert prices["measured"] == round(m.saving) and prices["measured_if"] == "What your receipts show"

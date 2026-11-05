@@ -5,15 +5,15 @@ from pathlib import Path
 
 import pytest
 
-from penny import board, home, model
+from penny import board, home, model, worth
 
 INSTANCE = Path(__file__).parent / "fixtures" / "home"  # a test instance, read over penny/defaults
 TODAY = date(2026, 9, 14)
 
 
 def _state(rules, assumptions, spend):
-    ds = board.rank(board.derive(rules, assumptions, spend, 1.0, {}, [], TODAY))
-    rows = board.verdict_rows(rules, assumptions, spend, 1.0)
+    ds = worth.rank(worth.derive(rules, assumptions, spend, 1.0, {}, [], TODAY))
+    rows = worth.verdict_rows(rules, assumptions, spend, 1.0)
     w = model.Window(date(2025, 9, 15), TODAY)
     return board.State(TODAY, Path("x.csv"), rules, assumptions, w, w.start, 0, spend, {}, ds, rows, None)
 
@@ -60,16 +60,16 @@ def test_small_baseline_swing_is_nothing_to_do():
 def test_perk_recorded_at_zero_settles_the_verdict():
     rules, assumptions, spend = _pair()
     assumptions["club"]["prices"]["note"] = "Recorded 2026-09-14: No real saving, $0 a year"
-    rows = {r.membership: r for r in board.verdict_rows(rules, assumptions, spend, 1.0)}
+    rows = {r.membership: r for r in worth.verdict_rows(rules, assumptions, spend, 1.0)}
     assert rows["club"].verdict == "drop"
-    keys = {d.key for d in board.derive(rules, assumptions, spend, 1.0, {}, [], TODAY)}
+    keys = {d.key for d in worth.derive(rules, assumptions, spend, 1.0, {}, [], TODAY)}
     assert "perks:zero" not in keys
 
 
 def test_cpp_swing_and_allowlist_cover_every_baseline_rate():
     rules, assumptions, _spend = _pair()
-    assert board.rate_multiples(rules["cards"]["pts"]) == {"restaurants": 3.0, "gas": 3.0}
-    s, _ = board.rate_swing(rules, assumptions, {"gas": 1000.0}, 1.0)
+    assert worth.rate_multiples(rules["cards"]["pts"]) == {"restaurants": 3.0, "gas": 3.0}
+    s, _ = worth.rate_swing(rules, assumptions, {"gas": 1000.0}, 1.0)
     assert s == 0  # no membership verdict carries the baseline's edge here
     real = home.load_rules(INSTANCE / "rules.toml")
     base = real["held"]["baseline_card"]

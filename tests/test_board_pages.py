@@ -14,7 +14,7 @@ import pytest
 from feedfix import install
 from test_board import ASSUMPTIONS
 
-from penny import board, cardworth, check, home, model, plaid
+from penny import board, cardworth, check, home, model, plaid, worth
 from penny import categorize as cat
 
 INSTANCE = Path(__file__).parent / "fixtures" / "home"  # a test instance, read over penny/defaults
@@ -48,16 +48,16 @@ def _wallet():
 
 
 def _state(rules, assumptions, spend):
-    ds = board.rank(board.derive(rules, assumptions, spend, 1.0, {}, [], TODAY))
-    rows = board.verdict_rows(rules, assumptions, spend, 1.0)
+    ds = worth.rank(worth.derive(rules, assumptions, spend, 1.0, {}, [], TODAY))
+    rows = worth.verdict_rows(rules, assumptions, spend, 1.0)
     w = model.Window(date(2025, 9, 14), TODAY)
-    worth = cardworth.card_worth(rules, assumptions, spend)
-    return board.State(TODAY, Path("x.csv"), rules, assumptions, w, w.start, 0, spend, {}, ds, rows, None, worth=worth, carried={"pts": spend})
+    ws = cardworth.card_worth(rules, assumptions, spend)
+    return board.State(TODAY, Path("x.csv"), rules, assumptions, w, w.start, 0, spend, {}, ds, rows, None, worth=ws, carried={"pts": spend})
 
 
 def test_card_rows_role_edge_split_and_badge():
     rules, assumptions, spend = _wallet()
-    rows = {r.key: r for r in board.card_rows(rules, assumptions, spend, 1.0, cardworth.card_worth(rules, assumptions, spend))}
+    rows = {r.key: r for r in worth.card_rows(rules, assumptions, spend, 1.0, cardworth.card_worth(rules, assumptions, spend))}
     assert "flat" not in rows  # only a card-worth alternative
     got = {k: (r.role, round(r.edge), round(r.bonus), round(r.default_part), r.badge) for k, r in rows.items()}
     assert got == {
@@ -70,20 +70,20 @@ def test_card_rows_role_edge_split_and_badge():
     }
     assert rows["pay"].default_part == pytest.approx(34.5)
     rules["cards"]["pts"]["annual_fee"] = 0
-    assert board.card_rows(rules, assumptions, spend, 1.0, cardworth.card_worth(rules, assumptions, spend))[0].badge == "worth it"
+    assert worth.card_rows(rules, assumptions, spend, 1.0, cardworth.card_worth(rules, assumptions, spend))[0].badge == "worth it"
     rules["cards"]["pts"]["annual_fee"] = 95
     assert rows["shop_card"].attributable == {"shop": pytest.approx(40.0)}
     assert rows["shop_card"].without.startswith("3% Shop")
     assert rows["shop_card"].verified_on == "2026-09-01" and rows["pay"].fee is None
     assert next(iter(rows)) == "pts" and list(rows)[-1] == "wh_card"  # baseline first, considered last
     spend["gas"] = 800.0
-    wh = next(r for r in board.card_rows(rules, assumptions, spend, 1.0) if r.key == "wh_card")
+    wh = next(r for r in worth.card_rows(rules, assumptions, spend, 1.0) if r.key == "wh_card")
     assert wh.badge == "worth applying?"
 
 
 def test_where_to_swipe_takes_the_top_held_card_ties_to_the_baseline():
     rules, _, spend = _wallet()
-    rows = board.swipe_rows(rules, spend, 1.0)
+    rows = worth.swipe_rows(rules, spend, 1.0)
     got = [(w.family, w.card, w.via, w.rate) for w in rows]
     assert got == [
         ("shop", "shop_card", "Shop Card", 0.05),
@@ -95,7 +95,7 @@ def test_where_to_swipe_takes_the_top_held_card_ties_to_the_baseline():
     ]
     assert rows[-1].gain == pytest.approx(15.0)
     del rules["cards"]["pay"]["default_via"]
-    assert board.swipe_rows(rules, spend, 1.0)[-1].via == "Pay Card"
+    assert worth.swipe_rows(rules, spend, 1.0)[-1].via == "Pay Card"
 
 
 def test_overview_tiles_sum_headline_nets_and_bonus_edges_only():
@@ -114,11 +114,11 @@ def test_overview_tiles_sum_headline_nets_and_bonus_edges_only():
 def test_flip_point_bisects_inside_the_range():
     rules, assumptions, _ = _wallet()
     spend = {"restaurants": 1000.0, cat.OTHER: 3000.0}  # 6000c − 95 against 80: zero at 2.917¢
-    c = board.flip_point(rules, assumptions, spend)
+    c = worth.flip_point(rules, assumptions, spend)
     assert 0.01 < c < 0.03 and c == pytest.approx(175 / 6000, abs=1e-6)
-    assert round(board.margin_at(rules, assumptions, spend, c)) == 0
+    assert round(worth.margin_at(rules, assumptions, spend, c)) == 0
     assumptions["point_value"]["pts"]["high"] = 0.025
-    assert board.flip_point(rules, assumptions, spend) is None
+    assert worth.flip_point(rules, assumptions, spend) is None
 
 
 def test_verified_on_is_allowed_only_as_an_iso_date():
@@ -250,13 +250,13 @@ def test_a_store_that_refuses_a_cards_network_takes_it_off_the_sheet_and_the_edg
     rules["families"]["warehouse"]["networks"] = ["visa"]
     rules["cards"]["pts"]["network"] = "visa"
     rules["cards"]["pay"]["network"] = "mastercard"
-    rows = {w.family: w for w in board.swipe_rows(rules, spend, 1.0)}
+    rows = {w.family: w for w in worth.swipe_rows(rules, spend, 1.0)}
     assert rows["warehouse"].card == "pts"  # the Pay Card pays more but the store won't take it
-    pay = next(r for r in board.card_rows(rules, assumptions, spend, 1.0) if r.key == "pay")
+    pay = next(r for r in worth.card_rows(rules, assumptions, spend, 1.0) if r.key == "pay")
     assert pay.edge == pytest.approx(34.5 - 5.0) and "warehouse" not in pay.detail
     for c in rules["cards"].values():  # a card with no network key counts as taken; give every one a network
         c["network"] = "mastercard"
-    rows = {w.family: w for w in board.swipe_rows(rules, spend, 1.0)}
+    rows = {w.family: w for w in worth.swipe_rows(rules, spend, 1.0)}
     assert rows["warehouse"].card == "" and rows["warehouse"].via == "no card you hold"
 
 

@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from feedfix import install
 
-from penny import board, home
+from penny import board, home, todo, worth
 from penny import load as ld
 
 INSTANCE = Path(__file__).parent / "fixtures" / "home"  # a test instance, read over penny/defaults
@@ -66,7 +66,7 @@ WIKI = """\
 def test_every_trigger_fires_with_kind_swing_and_order():
     rules, assumptions, spend = _synthetic()
     found = {"shop": [ld.Txn(date(2026, 8, 1), "Shop+ fee", 110.0, "Shopping")]}
-    ds = board.rank(board.derive(rules, assumptions, spend, 1.0, found, board.parse_wiki(WIKI), TODAY))
+    ds = worth.rank(worth.derive(rules, assumptions, spend, 1.0, found, todo.parse_wiki(WIKI), TODAY))
     got = {d.key: d for d in ds}
     assert [d.key for d in ds] == [
         "wiki:penny-call",  # dated wiki item pinned on top
@@ -103,7 +103,7 @@ def test_every_trigger_fires_with_kind_swing_and_order():
 def test_negative_swing_keeps_its_sign():
     rules, assumptions, spend = _synthetic()
     found = {"shop": [ld.Txn(date(2026, 8, 1), "Shop+ fee", 8.33, "Shopping")]}  # monthly billing
-    fee = next(d for d in board.derive(rules, assumptions, spend, 1.0, found, [], TODAY) if d.kind == "fee")
+    fee = next(d for d in worth.derive(rules, assumptions, spend, 1.0, found, [], TODAY) if d.kind == "fee")
     assert fee.swing == pytest.approx(8.33 - 100)
     assert any("monthly" in x for x in fee.explain)
 
@@ -113,19 +113,19 @@ def test_recorded_choice_closes_and_held_card_verify_closes():
     assumptions["shop"]["delivery"]["note"] = "Recorded 2026-09-13: I'd drive"
     assumptions["shop"]["rx"]["note"] = "Recorded 2026-09-13: priced at GoodRx"
     rules["cards"]["shop_card"]["verified"] = True
-    keys = {d.key for d in board.derive(rules, assumptions, spend, 1.0, {}, [], TODAY)}
+    keys = {d.key for d in worth.derive(rules, assumptions, spend, 1.0, {}, [], TODAY)}
     assert not keys & {"perk:shop.rx", "perk:shop.delivery", "verify:shop_card"}
 
 
 def test_swing_engine_perk_low_to_high():
     rules, _, spend = _synthetic()
     assumptions = {"shop": {"shipping": {"low": 0, "base": 50, "high": 100}}}
-    assert board.perk_swing(rules, assumptions, spend, 1.0, "shop", "shipping") == pytest.approx(100)
+    assert worth.perk_swing(rules, assumptions, spend, 1.0, "shop", "shipping") == pytest.approx(100)
 
 
 def test_verdict_line_names_the_perk_that_flips_it():
     rules, assumptions, spend = _synthetic()
-    rows = {r.title: r for r in board.verdict_rows(rules, assumptions, spend, 1.0)}
+    rows = {r.title: r for r in worth.verdict_rows(rules, assumptions, spend, 1.0)}
     shop = rows["Shop+ + Shop Card"]
     assert (shop.low, shop.base) == (pytest.approx(-60), pytest.approx(120))  # 40 from membership + perks − 100
     assert shop.verdict == "keep, if Rx is worth $60+ a year"
@@ -133,14 +133,14 @@ def test_verdict_line_names_the_perk_that_flips_it():
 
 
 def test_wiki_parse_and_countdown():
-    rows = board.parse_wiki(WIKI)
+    rows = todo.parse_wiki(WIKI)
     assert [(r.slug, r.item, r.heading) for r in rows] == [
         ("penny-call", "penny — call the bank", "Waiting on Alex"),
         ("penny-caps", "penny — spend caps", "Waiting on Alex"),
     ]
-    assert board.future_dates(rows[0].detail, TODAY) == [date(2026, 10, 1), date(2026, 11, 24)]
-    assert board.future_dates(rows[1].detail, TODAY) == []  # a past date doesn't pin
-    d = board.external_decision(rows[0], TODAY, None)
+    assert todo.future_dates(rows[0].detail, TODAY) == [date(2026, 10, 1), date(2026, 11, 24)]
+    assert todo.future_dates(rows[1].detail, TODAY) == []  # a past date doesn't pin
+    d = worth.external_decision(rows[0], TODAY, None)
     assert (d.due - TODAY).days == 18
     assert d.data["docs"] == ["docs/x.md"]
 
@@ -274,13 +274,13 @@ def test_rules_write_keeps_comments(server):
 def test_verdict_why_names_only_what_the_net_is_made_of():
     rules, assumptions, spend = _synthetic()
     assumptions["shop"]["rx"] = {"note": "", "low": 0, "base": 0, "high": 600}  # no perk at base
-    rows = {r.title: r for r in board.verdict_rows(rules, assumptions, spend, 1.0)}
+    rows = {r.title: r for r in worth.verdict_rows(rules, assumptions, spend, 1.0)}
     shop = rows["Shop+ + Shop Card"]  # 40 from membership − 100 fee
     assert shop.verdict == "drop, unless Rx is worth $60+ a year"
     assert shop.why.startswith("$40 of Shop Card cash back that needs Shop+ against the $100 fee: −$60.")
     assert "perk" not in shop.why
     assumptions["shop"]["rx"]["base"] = 180
-    shop = {r.title: r for r in board.verdict_rows(rules, assumptions, spend, 1.0)}["Shop+ + Shop Card"]
+    shop = {r.title: r for r in worth.verdict_rows(rules, assumptions, spend, 1.0)}["Shop+ + Shop Card"]
     assert "of which" not in shop.why and shop.why.startswith("Net +$120 counts Rx at $180.")
     assert rows["Warehouse Gold"].why == "No perk has a value yet; nothing offsets the $60 fee: −$60."
 
@@ -288,18 +288,18 @@ def test_verdict_why_names_only_what_the_net_is_made_of():
 def test_without_membership_rates_keep_the_other_rates():
     rules, assumptions, spend = _synthetic()
     rules["cards"]["shop_card"]["rates"]["gas"] = 0.02
-    d = next(d for d in board.derive(rules, assumptions, spend, 1.0, {}, [], TODAY) if d.key == "verify:shop_card")
+    d = next(d for d in worth.derive(rules, assumptions, spend, 1.0, {}, [], TODAY) if d.key == "verify:shop_card")
     assert "Without the membership: 3% Shop · 2% Gas · 1% everything else." in d.explain
 
 
 def test_refundable_upgrade_turns_a_wash_into_take_it_at_renewal():
     rules, assumptions, spend = _synthetic()
     rules["memberships"]["warehouse"]["tiers"]["exec"]["refundable"] = True
-    t = next(d for d in board.derive(rules, assumptions, spend, 1.0, {}, [], TODAY) if d.key == "tier:warehouse")
+    t = next(d for d in worth.derive(rules, assumptions, spend, 1.0, {}, [], TODAY) if d.key == "tier:warehouse")
     assert t.settled and t.data["refund"] and t.data["best"] == "exec"
     assert "at renewal" in t.title and "worst case is $0" in t.sub
     rules["memberships"]["warehouse"]["tiers"]["exec"]["fee"] = 300  # far behind: refund or not, no reason to bother
-    t = next(d for d in board.derive(rules, assumptions, spend, 1.0, {}, [], TODAY) if d.key == "tier:warehouse")
+    t = next(d for d in worth.derive(rules, assumptions, spend, 1.0, {}, [], TODAY) if d.key == "tier:warehouse")
     assert not t.data["refund"] and "at renewal" not in t.title
 
 
@@ -323,7 +323,7 @@ def test_a_settled_verdict_names_its_terms_instead_of_a_zero_width_range():
     rules, assumptions, spend = _synthetic()
     v = next(v for v in board.model.evaluate(rules, assumptions, spend, 1.0) if v.membership == "club")
     v.net = {"low": 40.0, "base": 40.0, "high": 40.0}
-    word, _, why = board.verdict_line(rules, assumptions, v)
+    word, _, why = worth.verdict_line(rules, assumptions, v)
     assert word == "keep" and "No input left to guess at" in why and "Positive at low" not in why
 
 

@@ -61,20 +61,13 @@ from . import load as ld
 from .fmt import num, pct, signed, usd
 from .model import LEVELS
 from .report import cents
-from .todo import (  # noqa: F401
+from .todo import (
     DOC_REF,
-    ISO_DATE,
-    WIKI_ID,
-    WikiRow,
-    future_dates,
     parse_wiki,
 )
-from .worth import (  # noqa: F401  (the verdict layer: board renders it, and callers reach it here)
+from .worth import (
     COSTCO_FAMILY,
-    PROMPTS,
     WALMART_FAMILY,
-    WALMART_ONLINE,
-    WALMART_STORE,
     WASH,
     CardRow,
     Decision,
@@ -83,36 +76,15 @@ from .worth import (  # noqa: F401  (the verdict layer: board renders it, and ca
     _and,
     _is_num,
     _labels,
-    _perks,
-    _verdict_name,
-    accepts,
     by_key,
-    card_held,
-    card_rows,
-    derive,
     detail_text,
-    external_decision,
-    flip_point,
     headline_key,
     held_tier,
-    margin_at,
     net_lines,
-    net_terms,
-    nets_under,
-    perk_label,
-    perk_swing,
-    rank,
     rate_multiples,
-    rate_swing,
     rate_text,
-    swing,
-    swipe_rows,
     tier_label,
     usable_spend,
-    verdict_line,
-    verdict_rows,
-    worth_margin,
-    worth_only,
 )
 
 MAX_BODY = 64_000
