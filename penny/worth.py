@@ -203,13 +203,14 @@ def derive(
     today: date | None = None,
     root: Path | None = None,
     measures: list[pairs.Measure] | None = None,
+    verdicts: dict | None = None,
 ) -> list[Decision]:
     """Every unresolved input, in no particular order (``rank`` orders them).
     ``spend`` is the window's spend by family, as ``model.evaluate`` takes it.
     ``measures`` are perks penny worked out from the stores' own captures
     (``pairs``): each is offered as the perk's measured answer."""
     today = today or datetime.now().astimezone().date()
-    verdicts = by_key(model.evaluate(rules, assumptions, spend, annualize))
+    verdicts = verdicts or by_key(model.evaluate(rules, assumptions, spend, annualize))
     labels = _labels(rules)
     mems = rules.get("memberships", {})
     cards = rules.get("cards", {})
@@ -469,8 +470,8 @@ def verdict_line(rules: dict, assumptions: dict, v: model.Verdict) -> tuple[str,
     return f"drop, unless {label} is worth {usd(need)}+ a year", "warn", f"{against[0].upper()}{against[1:]}. With {label} at its high ({usd(ph)}) the net is {signed(base - pb + ph)}."
 
 
-def verdict_rows(rules: dict, assumptions: dict, spend: dict, annualize: float) -> list[VerdictRow]:
-    verdicts = by_key(model.evaluate(rules, assumptions, spend, annualize))
+def verdict_rows(rules: dict, assumptions: dict, spend: dict, annualize: float, verdicts: dict | None = None) -> list[VerdictRow]:
+    verdicts = verdicts or by_key(model.evaluate(rules, assumptions, spend, annualize))
     out = []
     for mkey, m in rules.get("memberships", {}).items():
         v = verdicts[headline_key(rules, mkey)]
@@ -595,11 +596,11 @@ def flip_point(rules: dict, assumptions: dict, spend: dict[str, float], lo: floa
     return (lo + hi) / 2
 
 
-def card_rows(rules: dict, assumptions: dict, spend: dict[str, float], annualize: float, worth: list[cardworth.Worth] | None = None, today: date | None = None) -> list[CardRow]:
+def card_rows(rules: dict, assumptions: dict, spend: dict[str, float], annualize: float, worth: list[cardworth.Worth] | None = None, today: date | None = None, verdicts: dict | None = None) -> list[CardRow]:
     """Every card but a card-worth-only one: the baseline, then held cards by
     edge, then considered ones. ``spend`` is the window's, as ``derive`` takes
     it. With ``today``, a card's rotating quarters still to come count too."""
-    verdicts = by_key(model.evaluate(rules, assumptions, spend, annualize))
+    verdicts = verdicts or by_key(model.evaluate(rules, assumptions, spend, annualize))
     annual = {k: v * annualize for k, v in spend.items()}
     labels = _labels(rules)
     cards = rules.get("cards", {})
@@ -703,3 +704,134 @@ def swipe_rows(rules: dict, spend: dict[str, float], annualize: float, today: da
         else:
             out.append(row)
     return out + ([other] if other else [])
+
+
+# --------------------------------------------------------------------------
+# One load, one pass: what the board and `penny report` both start from
+
+WALMART_FAMILY = "walmart_delivery"
+WALMART_ONLINE = "walmart_online"  # Purchase History lists every walmart.com order: the capture has these
+WALMART_STORE = "walmart_store"  # in-store trips it may not list
+COSTCO_FAMILY = "costco"  # the OnePay feed the export undercounts; rules.toml says why
+
+
+@dataclass
+class Inputs:
+    """Everything the verdicts are worked out from, read once."""
+
+    rules: dict
+    assumptions: dict
+    window: model.Window
+    tx: list  # the window's spend rows
+    spend: dict[str, float]  # the window's spend by family, window units (as model.evaluate takes it)
+    found: dict  # membership fee charges seen in the window
+    carried: dict[str, dict[str, float]]  # annual spend by family on each card's own accounts (and the card-worth spend)
+    worth: list[cardworth.Worth]  # [card_worth].alternatives on the first one's spend
+    credit_years: dict[str, list[cardworth.AnnYear]]
+    credit_rows: list  # every row, transfers included: what credits are read from
+    export: Path | None = None
+    everything: list = field(default_factory=list)  # every labelled feed row (cash flow); empty on an export
+    measures: list = field(default_factory=list)  # perks worked out from the stores' captures (pairs)
+    walmart_measured: object = None
+    walmart_export: float = 0.0  # what the export alone had for the family, window units
+    walmart_dropped: float = 0.0  # other Walmart rows the capture stands in for, window units
+    walmart_feed_span: float | None = None  # the feed's Walmart rows over the capture's own days
+    costco_measured: object = None
+
+    @property
+    def annual(self) -> dict[str, float]:
+        return model.annualized(self.spend, self.window.annualize)
+
+    @property
+    def first(self) -> date:
+        return self.tx[0].date if self.tx else self.window.start
+
+
+def _credit_years(rows: list, rules: dict) -> dict[str, list[cardworth.AnnYear]]:
+    out = {}
+    if not rows:
+        return out
+    for ckey in rules.get("card_credits", {}):
+        own = cardworth.card_first_row(rows, rules, ckey)
+        first = max(rows[0].date, own) if own else rows[0].date
+        out[ckey] = cardworth.anniversary_years(rows, rules, ckey, first=first, last=rows[-1].date)
+    return out
+
+
+def load(root: Path, rules: dict, assumptions: dict, export: Path | None = None, *,
+         year: int | None = None, days: int | None = None, env: str = "production") -> Inputs:
+    """The inputs, from the instance's feed, or from a Rocket Money ``export``.
+
+    ``rules`` are resolved (``model.resolve_points``). On an export, Rocket
+    Money drops OnePay purchase rows, so the export's Walmart delivery is a
+    floor, and Walmart's own order history replaces it when a capture exists.
+    On the feed the OnePay rows are there; the capture is a cross-check only
+    (docs/budget-plan.md § Two-source comparison)."""
+    from . import costco, feed, walmart
+    from . import load as ld
+
+    root = Path(root)
+    families = rules.get("families", {})
+    if export is None:
+        everything = feed.labelled(root, rules, env, spend_only=False)
+        txns = [t for t in everything if feed.is_spend(t)]
+        if not txns:
+            raise FileNotFoundError(f"no transactions under {root / 'data'}; run penny import csv FILE, penny plaid sync, or penny demo to see it with sample data")
+        credit_rows = everything
+    else:
+        everything = []
+        ex = rules.get("export", {})
+        txns = ld.load(export, expense_sign=ex.get("expense_sign", "positive"), exclude_categories=ex.get("exclude_categories", []))
+        cat.categorize(txns, cat.build_families(rules))
+        # Credits hide in the categories exclude_categories drops: re-read with none dropped.
+        credit_rows = cardworth.load_for_credits(export, rules) if rules.get("card_credits") else []
+    w = model.pick_window(txns, year=year, days=days)
+    tx = model.in_window(txns, w)
+    spend = model.spend_by_family(tx)
+
+    measured = walmart.newest_measured(root / "data") if WALMART_FAMILY in families else None
+    walmart_export, walmart_dropped, span = spend.get(WALMART_FAMILY, 0.0), 0.0, None
+    if measured and export is not None:
+        spend[WALMART_FAMILY] = measured.annual / w.annualize
+        # The capture, scaled to a year, is the whole year of Walmart orders.
+        # Walmart.com rows are orders it lists; store rows before its first
+        # order are months the scaling already stands in for. Counting either
+        # again double-counts the same shopping.
+        before = spend.pop(WALMART_ONLINE, 0.0) + spend.pop(WALMART_STORE, 0.0)
+        store = sum(t.amount for t in tx if t.family == WALMART_STORE and t.date >= measured.first)
+        if store > 0:
+            spend[WALMART_STORE] = store
+        walmart_dropped = before - max(store, 0.0)
+    elif measured:
+        span = sum(t.amount for t in txns if t.family in (WALMART_FAMILY, WALMART_ONLINE, WALMART_STORE)
+                   and measured.first <= t.date <= measured.last)
+
+    # Card worth is about the card's own accounts, so it reads the rows, not
+    # the Walmart-adjusted spend.
+    alts = assumptions.get("card_worth", {}).get("alternatives", [])
+    carried = {k: model.annualized(cardworth.worth_spend(tx, rules, k), w.annualize)
+               for k, c in rules.get("cards", {}).items() if "accounts" in c or k in alts[:1]}
+    return Inputs(
+        rules, assumptions, w, tx, spend, model.observed_fees(tx, rules), carried,
+        cardworth.card_worth(rules, assumptions, carried[alts[0]]) if alts else [],
+        _credit_years(credit_rows, rules), credit_rows,
+        Path(export) if export is not None else None, everything,
+        [m for m in [pairs.for_instance(root, rules)] if m],
+        measured, walmart_export, walmart_dropped, span,
+        costco.newest_measured(root / "data") if COSTCO_FAMILY in families else None,
+    )
+
+
+@dataclass
+class Analysis:
+    """The verdicts, worked out once, and everything derived from them."""
+
+    verdicts: dict[tuple[str, str, bool], model.Verdict]
+    decisions: list[Decision]
+    rows: list[VerdictRow]
+
+
+def analyze(i: Inputs, wiki: list[WikiRow] | None = None, today: date | None = None, root: Path | None = None) -> Analysis:
+    verdicts = by_key(model.evaluate(i.rules, i.assumptions, i.spend, i.window.annualize))
+    decisions = rank(derive(i.rules, i.assumptions, i.spend, i.window.annualize, i.found, wiki, today, root, i.measures, verdicts=verdicts))
+    return Analysis(verdicts, decisions, verdict_rows(i.rules, i.assumptions, i.spend, i.window.annualize, verdicts=verdicts))

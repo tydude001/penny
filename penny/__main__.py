@@ -27,6 +27,7 @@ from . import (
     report,
     tomledit,
     walmart,
+    worth,
 )
 from . import categorize as cat
 from . import load as ld
@@ -99,26 +100,27 @@ def cmd_families(args):
 
 
 def cmd_report(args):
-    rules, txns, _fams, labels = _prep(args)
+    # The same inputs the board reads (worth.load), so the two never disagree.
+    rules = model.resolve_points(_rules(args))
     assumptions = _toml(args.assumptions)
     model.validate_rules(rules, assumptions)
-    w = _window(txns, year=args.year, days=args.days)
-    tx = model.in_window(txns, w)
-    spend = model.spend_by_family(tx)
-    verdicts = model.evaluate(rules, assumptions, spend, w.annualize)
-    fees = model.observed_fees(tx, rules)
+    try:
+        i = worth.load(args.home, rules, assumptions, args.export, year=args.year, days=args.days, env=getattr(args, "env", "production"))
+    except (ValueError, FileNotFoundError) as e:
+        sys.exit(str(e))
+    labels = {f.key: f.label for f in cat.build_families(rules)}
+    labels[cat.OTHER] = "other"
+    verdicts = model.evaluate(rules, assumptions, i.spend, i.window.annualize)
     unverified = [k for k, c in rules.get("cards", {}).items() if not c.get("verified", False)]
     unverified += [k for k, m in rules.get("memberships", {}).items() if not m.get("verified", False)]
-    pr = report.point_range_block(rules, assumptions, spend, w.annualize)
+    pr = report.point_range_block(rules, assumptions, i.spend, i.window.annualize)
     extra = []
-    if rules.get("card_credits"):
-        # Credits hide in categories exclude_categories drops: re-read with none dropped.
-        ctx = cardworth.load_for_credits(args.export, rules) if args.export else feed.labelled(args.home, rules, spend_only=False)
-        extra.append(report.credits_block(rules, ctx, first=ctx[0].date, last=ctx[-1].date))
+    if rules.get("card_credits") and i.credit_rows:
+        extra.append(report.credits_block(rules, i.credit_rows, first=i.credit_rows[0].date, last=i.credit_rows[-1].date))
     alts = assumptions.get("card_worth", {}).get("alternatives", [])
     if alts:
-        extra.append(report.card_worth_block(rules, assumptions, cardworth.worth_spend(tx, rules, alts[0]), w.annualize))
-    print(report.render(w, len(tx), spend, labels, verdicts, fees, rules, unverified, pr, extra))
+        extra.append(report.card_worth_block(rules, assumptions, cardworth.worth_spend(i.tx, rules, alts[0]), i.window.annualize))
+    print(report.render(i.window, len(i.tx), i.spend, labels, verdicts, i.found, rules, unverified, pr, extra))
 
 
 def cmd_walmart(args):

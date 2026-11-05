@@ -54,6 +54,7 @@ from . import (
     statements,
     tomledit,
     walmart,
+    worth,
 )
 from . import categorize as cat
 from . import load as ld
@@ -69,7 +70,11 @@ from .todo import (  # noqa: F401
     parse_wiki,
 )
 from .worth import (  # noqa: F401  (the verdict layer: board renders it, and callers reach it here)
+    COSTCO_FAMILY,
     PROMPTS,
+    WALMART_FAMILY,
+    WALMART_ONLINE,
+    WALMART_STORE,
     WASH,
     CardRow,
     Decision,
@@ -143,10 +148,6 @@ class Config:
     export: Path | None = None
 
 
-WALMART_FAMILY = "walmart_delivery"
-WALMART_ONLINE = "walmart_online"  # Purchase History lists every walmart.com order: the capture has these
-WALMART_STORE = "walmart_store"  # in-store trips it may not list
-COSTCO_FAMILY = "costco"  # the OnePay feed the export undercounts; rules.toml says why
 
 
 def git_state(cfg: Config) -> dict[str, str] | None:
@@ -188,6 +189,7 @@ class State:
     root: Path | None = None
     checks: check.Checks | None = None  # the balance checks, as `penny check` runs them
     worth_now: networth.NetWorth | None = None  # every account's balance and month-end net worth; None on an export
+    analysis: worth.Analysis | None = None  # the verdicts, worked out once per load
 
     @property
     def noun(self) -> str:
@@ -416,98 +418,16 @@ def _load_state(cfg: Config, today: date) -> State:
     # git and sync_alert are left None here: load_state fills them in each time.
     rules, assumptions = model.resolve_points(home.load_rules(cfg.rules)), _toml(cfg.assumptions)
     model.validate_rules(rules, assumptions)
+    i = worth.load(cfg.root, rules, assumptions, cfg.export)
     if cfg.export is None:
-        return load_feed_state(cfg, rules, assumptions, today)
-    export = cfg.export
-    ex = rules.get("export", {})
-    txns = ld.load(export, expense_sign=ex.get("expense_sign", "positive"), exclude_categories=ex.get("exclude_categories", []))
-    cat.categorize(txns, cat.build_families(rules))
-    w = model.pick_window(txns)
-    tx = model.in_window(txns, w)
-    spend = model.spend_by_family(tx)
-    # Rocket Money drops OnePay purchase rows, so the export's Walmart delivery
-    # is a floor. Walmart's own order history replaces it when a capture exists.
-    measured = walmart.newest_measured(cfg.root / "data") if WALMART_FAMILY in rules.get("families", {}) else None
-    walmart_export = spend.get(WALMART_FAMILY, 0.0)
-    walmart_dropped = 0.0
-    if measured:
-        spend[WALMART_FAMILY] = measured.annual / w.annualize
-        # The capture, scaled to a year, is the whole year of Walmart orders.
-        # Walmart.com rows are orders it lists; store rows before its first
-        # order are months the scaling already stands in for. Counting either
-        # again double-counts the same shopping.
-        before = spend.get(WALMART_ONLINE, 0.0) + spend.get(WALMART_STORE, 0.0)
-        spend.pop(WALMART_ONLINE, None)
-        store = sum(t.amount for t in tx if t.family == WALMART_STORE and t.date >= measured.first)
-        spend.pop(WALMART_STORE, None)
-        if store > 0:
-            spend[WALMART_STORE] = store
-        walmart_dropped = before - max(store, 0.0)
-    found = model.observed_fees(tx, rules)
+        names = card_names(rules)
+        for t in i.everything:
+            t.account = names.get(t.account_number, t.account) if t.account_number else t.account
     wiki = parse_wiki(cfg.wiki.read_text()) if cfg.wiki and cfg.wiki.is_file() else []
-    measures = [m for m in [pairs.for_instance(cfg.root, rules)] if m]
-    decisions = rank(derive(rules, assumptions, spend, w.annualize, found, wiki, today, cfg.root, measures))
-    rows = verdict_rows(rules, assumptions, spend, w.annualize)
-    receipts = costco.newest_measured(cfg.root / "data") if COSTCO_FAMILY in rules.get("families", {}) else None
-    # The card figures, the same way `penny report` works them out: the
-    # in-window export (no Walmart capture: card worth is about the Sapphire's
-    # own accounts), and credits from a re-read that keeps excluded categories.
-    annual = lambda sp: model.annualized(sp, w.annualize)
-    alts = assumptions.get("card_worth", {}).get("alternatives", [])
-    carried = {k: annual(cardworth.worth_spend(tx, rules, k)) for k, c in rules.get("cards", {}).items() if "accounts" in c or k in alts[:1]}
-    worth = cardworth.card_worth(rules, assumptions, carried[alts[0]]) if alts else []
-    credit_years = {}
-    if rules.get("card_credits"):
-        ctx = cardworth.load_for_credits(export, rules)
-        for ckey in rules["card_credits"]:
-            own = cardworth.card_first_row(ctx, rules, ckey)
-            first = max(ctx[0].date, own) if own else ctx[0].date
-            credit_years[ckey] = cardworth.anniversary_years(ctx, rules, ckey, first=first, last=ctx[-1].date)
-    return State(today, Path(export), rules, assumptions, w, tx[0].date if tx else w.start, len(tx), spend, found, decisions, rows, None, measured, walmart_export, walmart_dropped, receipts, worth, carried, credit_years,
-                 None)
-
-
-def load_feed_state(cfg: Config, rules: dict, assumptions: dict, today: date) -> State:
-    """The board on the Plaid + Apple Card feed (M3). Walmart spend is the feed's
-    own: it has the OnePay rows the export dropped, and over the capture's days it
-    comes within 4% of the order history, under it where Walmart charged less
-    than the order total (docs/budget-plan.md § Two-source comparison). The
-    capture is shown beside it as a cross-check, never substituted."""
-    everything = feed.labelled(cfg.root, rules, spend_only=False)
-    names = card_names(rules)
-    for t in everything:
-        t.account = names.get(t.account_number, t.account) if t.account_number else t.account
-    txns = [t for t in everything if feed.is_spend(t)]
-    if not txns:
-        raise FileNotFoundError(f"no transactions under {cfg.root / 'data'}; run penny import csv FILE, penny plaid sync, or penny demo to see it with sample data")
-    w = model.pick_window(txns)
-    tx = model.in_window(txns, w)
-    spend = model.spend_by_family(tx)
-    measured = walmart.newest_measured(cfg.root / "data") if WALMART_FAMILY in rules.get("families", {}) else None
-    span = None
-    if measured:
-        span = sum(t.amount for t in txns if t.family in (WALMART_FAMILY, WALMART_ONLINE, WALMART_STORE)
-                   and measured.first <= t.date <= measured.last)
-    found = model.observed_fees(tx, rules)
-    wiki = parse_wiki(cfg.wiki.read_text()) if cfg.wiki and cfg.wiki.is_file() else []
-    measures = [m for m in [pairs.for_instance(cfg.root, rules)] if m]
-    decisions = rank(derive(rules, assumptions, spend, w.annualize, found, wiki, today, cfg.root, measures))
-    rows = verdict_rows(rules, assumptions, spend, w.annualize)
-    receipts = costco.newest_measured(cfg.root / "data") if COSTCO_FAMILY in rules.get("families", {}) else None
-    annual = lambda sp: model.annualized(sp, w.annualize)
-    alts = assumptions.get("card_worth", {}).get("alternatives", [])
-    carried = {k: annual(cardworth.worth_spend(tx, rules, k)) for k, c in rules.get("cards", {}).items() if "accounts" in c or k in alts[:1]}
-    worth = cardworth.card_worth(rules, assumptions, carried[alts[0]]) if alts else []
-    # Credits from every row, transfers included: a statement credit is real
-    # money whatever the feed calls it.
-    credit_years = {}
-    for ckey in rules.get("card_credits", {}):
-        own = cardworth.card_first_row(everything, rules, ckey)
-        first = max(everything[0].date, own) if own else everything[0].date
-        credit_years[ckey] = cardworth.anniversary_years(everything, rules, ckey, first=first, last=everything[-1].date)
-    return State(today, None, rules, assumptions, w, tx[0].date if tx else w.start, len(tx), spend, found, decisions, rows,
-                 None, measured, spend.get(WALMART_FAMILY, 0.0), 0.0, receipts, worth, carried, credit_years,
-                 None, span, everything, cfg.root)
+    a = worth.analyze(i, wiki, today, cfg.root)
+    return State(today, i.export, rules, assumptions, i.window, i.first, len(i.tx), i.spend, i.found, a.decisions, a.rows,
+                 None, i.walmart_measured, i.walmart_export, i.walmart_dropped, i.costco_measured, i.worth, i.carried, i.credit_years,
+                 None, i.walmart_feed_span, i.everything, cfg.root if cfg.export is None else None, analysis=a)
 
 
 # --------------------------------------------------------------------------
