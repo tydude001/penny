@@ -180,10 +180,10 @@ high = 450
 """
 
 
-def _serve(tmp_path, export):
+def _serve(tmp_path):
     shutil.copy(INSTANCE / "rules.toml", tmp_path / "rules.toml")
     (tmp_path / "assumptions.toml").write_text(ASSUMPTIONS)
-    cfg = board.Config(tmp_path, tmp_path / "rules.toml", tmp_path / "assumptions.toml", None, export)
+    cfg = board.Config(tmp_path, tmp_path / "rules.toml", tmp_path / "assumptions.toml")
     srv = ThreadingHTTPServer(("127.0.0.1", 0), board.make_handler(cfg, today=lambda: TODAY))
     t = threading.Thread(target=srv.serve_forever, daemon=True)
     t.start()
@@ -198,13 +198,7 @@ def _serve(tmp_path, export):
 def server(tmp_path):
     """The board on the feed, as penny-board runs."""
     install(tmp_path)
-    yield from _serve(tmp_path, None)
-
-
-@pytest.fixture
-def export_server(tmp_path):
-    """The board on the Rocket Money export (``--export``), kept while the exports are."""
-    yield from _serve(tmp_path, FIX)
+    yield from _serve(tmp_path)
 
 
 def _post(c, body):
@@ -298,23 +292,6 @@ def test_without_membership_rates_keep_the_other_rates():
     assert "Without the membership: 3% Shop · 2% Gas · 1% everything else." in d.explain
 
 
-def test_walmart_capture_replaces_the_exports_floor(export_server):
-    root, c = export_server
-    status, page = _get(c, "/data")
-    assert status == 200 and "a floor" in page and "Capture Walmart order history" in page
-    (root / "data").mkdir()
-    listing = {"url": "https://www.walmart.com/orchestra/cph/graphql/PurchaseHistoryV3/x",
-               "body": {"data": {"purchaseHistory": {"orders": [
-                   {"id": "a", "orderDate": "2026-01-01T10:00:00", "priceDetails": {"orderTotal": {"value": 500.0}}},
-                   {"id": "b", "orderDate": "2026-12-31T10:00:00", "priceDetails": {"orderTotal": {"value": 1000.0}}}]}}}}
-    (root / "data" / "walmart-orders-2026-12-31.json").write_text(json.dumps([listing]))
-    s = board.load_state(board.Config(root, root / "rules.toml", root / "assumptions.toml", None, FIX), TODAY)
-    assert s.walmart_measured.orders == 2
-    assert s.spend[board.WALMART_FAMILY] * s.window.annualize == pytest.approx(1500.0)
-    status, page = _get(c, "/data")
-    assert status == 200 and "a floor" not in page and "$1,500 a year" in page and "walmart-orders-2026-12-31.json" in page
-
-
 def test_refundable_upgrade_turns_a_wash_into_take_it_at_renewal():
     rules, assumptions, spend = _synthetic()
     rules["memberships"]["warehouse"]["tiers"]["exec"]["refundable"] = True
@@ -340,25 +317,6 @@ def test_measured_answer_is_one_click_and_costco_receipts_show_in_the_rail(serve
     (root / "data" / "costco-receipts-2026-12-31.json").write_text(json.dumps([receipt]))
     status, page = _get(c, "/data")
     assert status == 200 and "receipts</h2>" in page and "$300 a year before tax" in page and "costco-receipts-2026-12-31.json" in page
-
-
-def test_walmart_capture_stands_in_for_the_exports_other_walmart_rows(tmp_path):
-    rules = home.load_rules(INSTANCE / "rules.toml")
-    (tmp_path / "data").mkdir()
-    (tmp_path / "rules.toml").write_text((INSTANCE / "rules.toml").read_text())
-    (tmp_path / "assumptions.toml").write_text(ASSUMPTIONS)
-    cfg = board.Config(tmp_path, tmp_path / "rules.toml", tmp_path / "assumptions.toml", None, FIX)
-    before = board.load_state(cfg, TODAY)
-    others = {f: before.spend.get(f, 0.0) for f in (board.WALMART_ONLINE, board.WALMART_STORE)}
-    assert all(f in rules["families"] for f in others)
-    listing = {"url": "https://www.walmart.com/orchestra/cph/graphql/PurchaseHistoryV3/x",
-               "body": {"data": {"purchaseHistory": {"orders": [
-                   {"id": "a", "orderDate": "2099-01-01T10:00:00", "priceDetails": {"orderTotal": {"value": 500.0}}}]}}}}
-    (tmp_path / "data" / "walmart-orders-2099-01-01.json").write_text(json.dumps([listing]))
-    s = board.load_state(cfg, TODAY)
-    # A capture after every export row: Walmart.com and store rows are all months its scaling covers.
-    assert board.WALMART_ONLINE not in s.spend and board.WALMART_STORE not in s.spend
-    assert s.walmart_dropped == pytest.approx(sum(others.values()))
 
 
 def test_a_settled_verdict_names_its_terms_instead_of_a_zero_width_range():

@@ -121,7 +121,7 @@ def test_the_board_runs_on_the_feed_when_started_without_an_export(tmp_path):
              merchant="Walmart", channel="online", mcc="5310", posted="2026-09-02"),
         prow("paid", -100.0, "LOAN_DISBURSEMENTS", "LOAN_DISBURSEMENTS_OTHER_DISBURSEMENT", posted="2026-09-03"),
     ])
-    cfg = board.Config(tmp_path, tmp_path / "rules.toml", tmp_path / "assumptions.toml", None, None)
+    cfg = board.Config(tmp_path, tmp_path / "rules.toml", tmp_path / "assumptions.toml", None)
     s = board.load_state(cfg, date(2026, 9, 13))
     assert s.export is None and s.n_txns == 2  # the card payment is not spend
     assert s.spend == {"restaurants": 40.0, "walmart_online": 60.0}

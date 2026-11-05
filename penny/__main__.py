@@ -117,6 +117,8 @@ def cmd_report(args):
     extra = []
     if rules.get("card_credits") and i.credit_rows:
         extra.append(report.credits_block(rules, i.credit_rows, first=i.credit_rows[0].date, last=i.credit_rows[-1].date))
+    if args.export and worth.WALMART_FAMILY in rules.get("families", {}):
+        extra.append(worth.WALMART_FLOOR)
     alts = assumptions.get("card_worth", {}).get("alternatives", [])
     if alts:
         extra.append(report.card_worth_block(rules, assumptions, cardworth.worth_spend(i.tx, rules, alts[0]), i.window.annualize))
@@ -242,7 +244,6 @@ def cmd_pairs(args):
 def cmd_board(args):
     board.serve(
         args.home,
-        export=Path(args.export) if args.export else None,
         host=args.host,
         port=args.port,
         todo_file=Path(args.todo_file).expanduser() if args.todo_file else None,
@@ -499,7 +500,6 @@ def main(argv=None):
     s.add_argument("--top", type=int, default=8, help="how many unpaired items to list or suggest for")
     s.set_defaults(fn=cmd_pairs)
     s = sub.add_parser("board", help="serve the decision board; Record writes into rules.toml / assumptions.toml")
-    s.add_argument("--export", help="run on a Rocket Money export CSV instead of the Plaid + Apple feed")
     g = s.add_mutually_exclusive_group()
     g.add_argument("--tailscale", action="store_true", help="bind this machine's Tailscale IPv4 instead of 127.0.0.1")
     g.add_argument("--host", help="bind address (default 127.0.0.1); anything else is reachable by others and warns, as the board has no login")

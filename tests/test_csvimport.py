@@ -155,6 +155,6 @@ def test_compare_with_no_export_takes_the_imported_rocket_rows(inst, capsys):
 def test_the_board_reads_imported_rows(inst, tmp_path):
     shutil.copy(FIX, tmp_path / "e.csv")
     _cli(inst, "import", "csv", str(tmp_path / "e.csv"), "--preset", "rocket")
-    cfg = board.Config(inst, inst / "rules.toml", inst / "assumptions.toml", None, None)
+    cfg = board.Config(inst, inst / "rules.toml", inst / "assumptions.toml", None)
     s = board.base_state(cfg, date(2026, 1, 31))
     assert s.n_txns == 13 and s.spend["costco"] == 300.0

@@ -145,7 +145,7 @@ def server(tmp_path):
     shutil.copy(INSTANCE / "rules.toml", tmp_path / "rules.toml")
     (tmp_path / "assumptions.toml").write_text(ASSUMPTIONS + CARD_WORTH)
     install(tmp_path)
-    cfg = board.Config(tmp_path, tmp_path / "rules.toml", tmp_path / "assumptions.toml", None, None)
+    cfg = board.Config(tmp_path, tmp_path / "rules.toml", tmp_path / "assumptions.toml", None)
     srv = ThreadingHTTPServer(("127.0.0.1", 0), board.make_handler(cfg, today=lambda: TODAY))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:

@@ -727,6 +727,8 @@ def swipe_rows(rules: dict, spend: dict[str, float], annualize: float, today: da
 WALMART_FAMILY = "walmart_delivery"
 WALMART_ONLINE = "walmart_online"  # Purchase History lists every walmart.com order: the capture has these
 WALMART_STORE = "walmart_store"  # in-store trips it may not list
+WALMART_FLOOR = ("Walmart spend is a floor: a Rocket Money export drops OnePay purchase rows. "
+                 "Run penny report without an export to read the card feed, which has them.")
 COSTCO_FAMILY = "costco"  # the OnePay feed the export undercounts; rules.toml says why
 
 
@@ -748,8 +750,6 @@ class Inputs:
     everything: list = field(default_factory=list)  # every labelled feed row (cash flow); empty on an export
     measures: list = field(default_factory=list)  # perks worked out from the stores' captures (pairs)
     walmart_measured: object = None
-    walmart_export: float = 0.0  # what the export alone had for the family, window units
-    walmart_dropped: float = 0.0  # other Walmart rows the capture stands in for, window units
     walmart_feed_span: float | None = None  # the feed's Walmart rows over the capture's own days
     costco_measured: object = None
 
@@ -775,13 +775,12 @@ def _credit_years(rows: list, rules: dict) -> dict[str, list[cardworth.AnnYear]]
 
 def load(root: Path, rules: dict, assumptions: dict, export: Path | None = None, *,
          year: int | None = None, days: int | None = None, env: str = "production") -> Inputs:
-    """The inputs, from the instance's feed, or from a Rocket Money ``export``.
+    """The inputs, from the instance's feed, or from a Rocket Money ``export``
+    (``penny report EXPORT.csv``; the board reads only the feed).
 
-    ``rules`` are resolved (``model.resolve_points``). On an export, Rocket
-    Money drops OnePay purchase rows, so the export's Walmart delivery is a
-    floor, and Walmart's own order history replaces it when a capture exists.
-    On the feed the OnePay rows are there; the capture is a cross-check only
-    (docs/budget-plan.md § Two-source comparison)."""
+    ``rules`` are resolved (``model.resolve_points``). Rocket Money drops
+    OnePay purchase rows, so an export's Walmart spend is a floor; the report
+    says so (``WALMART_FLOOR``) rather than patching it from a capture."""
     from . import costco, feed, walmart
     from . import load as ld
 
@@ -804,20 +803,11 @@ def load(root: Path, rules: dict, assumptions: dict, export: Path | None = None,
     tx = model.in_window(txns, w)
     spend = model.spend_by_family(tx)
 
+    # A capture never replaces spend: it measures a perk (pairs) and
+    # cross-checks the feed's Walmart rows over its own days.
     measured = walmart.newest_measured(root / "data") if WALMART_FAMILY in families else None
-    walmart_export, walmart_dropped, span = spend.get(WALMART_FAMILY, 0.0), 0.0, None
-    if measured and export is not None:
-        spend[WALMART_FAMILY] = measured.annual / w.annualize
-        # The capture, scaled to a year, is the whole year of Walmart orders.
-        # Walmart.com rows are orders it lists; store rows before its first
-        # order are months the scaling already stands in for. Counting either
-        # again double-counts the same shopping.
-        before = spend.pop(WALMART_ONLINE, 0.0) + spend.pop(WALMART_STORE, 0.0)
-        store = sum(t.amount for t in tx if t.family == WALMART_STORE and t.date >= measured.first)
-        if store > 0:
-            spend[WALMART_STORE] = store
-        walmart_dropped = before - max(store, 0.0)
-    elif measured:
+    span = None
+    if measured:
         span = sum(t.amount for t in txns if t.family in (WALMART_FAMILY, WALMART_ONLINE, WALMART_STORE)
                    and measured.first <= t.date <= measured.last)
 
@@ -832,7 +822,7 @@ def load(root: Path, rules: dict, assumptions: dict, export: Path | None = None,
         _credit_years(credit_rows, rules), credit_rows,
         Path(export) if export is not None else None, everything,
         [m for m in [pairs.for_instance(root, rules)] if m],
-        measured, walmart_export, walmart_dropped, span,
+        measured, span,
         costco.newest_measured(root / "data") if COSTCO_FAMILY in families else None,
     )
 

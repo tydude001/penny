@@ -30,7 +30,7 @@ def root(tmp_path):
 
 
 def _cfg(root):
-    return board.Config(root, root / "rules.toml", root / "assumptions.toml", None, None)
+    return board.Config(root, root / "rules.toml", root / "assumptions.toml", None)
 
 
 @pytest.fixture

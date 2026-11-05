@@ -2,7 +2,7 @@
 per input that writes the choice back where it belongs.
 
 The decision list is computed, not maintained. Every GET reads the feed
-(or the export, with --export), rules.toml, assumptions.toml and, with
+rules.toml, assumptions.toml and, with
 --todo-file, the ``penny-`` rows of a Markdown to-do table
 (cached on their files' stats, so a change to any of them is read at once), and
 derives decisions from what is still unresolved in them: ``verified = false``
@@ -145,7 +145,6 @@ class Config:
     rules: Path
     assumptions: Path
     wiki: Path | None = None
-    export: Path | None = None
 
 
 
@@ -177,8 +176,6 @@ class State:
     verdicts: list[VerdictRow]
     git: dict[str, str] | None
     walmart_measured: walmart.Measured | None = None
-    walmart_export: float = 0.0  # what the export alone had for the family, window units
-    walmart_dropped: float = 0.0  # other Walmart rows the capture stands in for, window units
     costco_measured: costco.Measured | None = None
     worth: list[cardworth.Worth] = field(default_factory=list)  # [card_worth].alternatives on the first one's spend
     carried: dict[str, dict[str, float]] = field(default_factory=dict)  # annual spend by family on each card's own accounts (and the card-worth spend)
@@ -307,8 +304,6 @@ _NETWORTH: dict[Path, tuple[tuple, networth.NetWorth | None]] = {}
 def load_networth(cfg: Config, rules: dict, c: check.Checks, today: date) -> networth.NetWorth | None:
     """``networth.load`` on the statements the checks parsed, rerun only when
     the Plaid store, the Apple files or the day changes: it reads every ledger."""
-    if cfg.export is not None:
-        return None
     data = cfg.root / "data"
     lacks = frozenset(check.reward_rates(rules))
     key = (today, _scan(data / "plaid" / "production"), _scan(data / "statements"), _scan(data / "apple"), lacks)
@@ -357,15 +352,14 @@ def cached_git_state(cfg: Config) -> dict[str, str] | None:
 
 
 def _cfg_key(cfg: Config) -> tuple:
-    return (cfg.root, cfg.rules, cfg.assumptions, cfg.wiki, cfg.export)
+    return (cfg.root, cfg.rules, cfg.assumptions, cfg.wiki)
 
 
 def _state_key(cfg: Config, today: date) -> tuple:
     """Every file ``_load_state`` reads, by stat, and the day."""
     data = cfg.root / "data"
-    key = [today, *(_stat(p) for p in (cfg.rules, home.DEFAULT_RULES, cfg.assumptions, cfg.wiki, cfg.export, cfg.root / feed.OVERRIDES, cfg.root / feed.MERCHANTS))]
-    if cfg.export is None:
-        key += [_scan(data / "plaid" / "production"), _scan(data / "apple", "*.csv"), _scan(data / "imports", "*.csv")]
+    key = [today, *(_stat(p) for p in (cfg.rules, home.DEFAULT_RULES, cfg.assumptions, cfg.wiki, cfg.root / feed.OVERRIDES, cfg.root / feed.MERCHANTS))]
+    key += [_scan(data / "plaid" / "production"), _scan(data / "apple", "*.csv"), _scan(data / "imports", "*.csv")]
     key += [_scan(data, "walmart-orders-*.json"), _scan(data, "costco-receipts-*.json"), _stat(cfg.root / pairs.FILE), _dirs(cfg.root / "docs")]
     return tuple(key)
 
@@ -418,16 +412,15 @@ def _load_state(cfg: Config, today: date) -> State:
     # git and sync_alert are left None here: load_state fills them in each time.
     rules, assumptions = model.resolve_points(home.load_rules(cfg.rules)), _toml(cfg.assumptions)
     model.validate_rules(rules, assumptions)
-    i = worth.load(cfg.root, rules, assumptions, cfg.export)
-    if cfg.export is None:
-        names = card_names(rules)
-        for t in i.everything:
-            t.account = names.get(t.account_number, t.account) if t.account_number else t.account
+    i = worth.load(cfg.root, rules, assumptions)
+    names = card_names(rules)
+    for t in i.everything:
+        t.account = names.get(t.account_number, t.account) if t.account_number else t.account
     wiki = parse_wiki(cfg.wiki.read_text()) if cfg.wiki and cfg.wiki.is_file() else []
     a = worth.analyze(i, wiki, today, cfg.root)
-    return State(today, i.export, rules, assumptions, i.window, i.first, len(i.tx), i.spend, i.found, a.decisions, a.rows,
-                 None, i.walmart_measured, i.walmart_export, i.walmart_dropped, i.costco_measured, i.worth, i.carried, i.credit_years,
-                 None, i.walmart_feed_span, i.everything, cfg.root if cfg.export is None else None, analysis=a)
+    return State(today, None, rules, assumptions, i.window, i.first, len(i.tx), i.spend, i.found, a.decisions, a.rows,
+                 None, walmart_measured=i.walmart_measured, costco_measured=i.costco_measured, worth=i.worth, carried=i.carried,
+                 credit_years=i.credit_years, walmart_feed_span=i.walmart_feed_span, txns=i.everything, root=cfg.root, analysis=a)
 
 
 # --------------------------------------------------------------------------
@@ -603,12 +596,10 @@ def _audit(cfg: Config, lines: list[dict]) -> None:
 def spend_rows(cfg: Config, rules: dict, today: date | None = None) -> list[ld.Txn]:
     """The labelled feed's spend rows, from the cached state when the board
     runs on the feed rather than rereading every ledger for one ID."""
-    if cfg.export is None:
-        try:
-            return [t for t in base_state(cfg, today or datetime.now().astimezone().date()).txns if feed.is_spend(t)]
-        except FileNotFoundError:  # no feed rows at all
-            return []
-    return feed.labelled(cfg.root, rules)
+    try:
+        return [t for t in base_state(cfg, today or datetime.now().astimezone().date()).txns if feed.is_spend(t)]
+    except FileNotFoundError:  # no feed rows at all
+        return []
 
 
 def record_override(cfg: Config, payload, now: datetime | None = None, today: date | None = None) -> dict:
@@ -1777,35 +1768,14 @@ def render_walmart(s: State) -> str:
     if not fam:
         return ""
     label = escape(fam.get("label", WALMART_FAMILY))
-    export_yr = s.walmart_export * s.window.annualize
     m = s.walmart_measured
-    if s.export is None:
-        parts = [f"<div><h2>{label}</h2><dl>", f"<dt>spend</dt><dd>{usd(export_yr)} a year</dd>"]
-        if m and s.walmart_feed_span is not None:
-            parts += [f"<dt>capture</dt><dd>{usd(m.total)}, {m.first} → {m.last}</dd>",
-                      f"<dt>feed, same days</dt><dd>{usd(s.walmart_feed_span)}</dd>"]
-        parts.append("</dl><p class=fine>From the card feed, which has every OnePay row."
-                     + (" The order capture is a cross-check: the feed runs a little under it where Walmart charged less than the order total."
-                        if m else "") + "</p></div>")
-        return "".join(parts)
-    if not m:
-        return (f"<div><h2>{label}</h2><dl><dt>spend</dt><dd class=warn>{usd(export_yr)} a year, a floor</dd></dl>"
-                "<p class=fine>From the export only, which drops OnePay purchase rows. Capture Walmart order history "
-                "(scripts/walmart-orders-capture.js) into data/ for the real figure.</p></div>")
-    what = "order totals" if m.listed else "opened orders' line items, before tax"
-    parts = [
-        f"<div><h2>{label}</h2><dl>",
-        f"<dt>spend</dt><dd>{usd(m.annual)} a year</dd>",
-        f"<dt>from</dt><dd>{escape(m.path.name)}</dd>",
-        f"<dt>orders</dt><dd>{m.orders}, {m.first} → {m.last}</dd>",
-        f"<dt>export had</dt><dd>{usd(export_yr)} a year</dd>",
-        (f"<dt>left out</dt><dd>{usd(s.walmart_dropped * s.window.annualize)} of Walmart.com and store rows</dd>" if s.walmart_dropped > 0.5 else "")
-        + "</dl>",
-        f"<p class=fine>Walmart's order history ({what}), not the export, which drops OnePay purchase rows."
-        + (f" {m.days} days scaled to a year: an estimate, not a measurement." if m.days < 365 else "")
-        + (" The export's Walmart.com orders and pre-capture store trips are left out: the capture lists those orders, and its scaling stands in for those months." if s.walmart_dropped > 0.5 else "")
-        + "</p></div>",
-    ]
+    parts = [f"<div><h2>{label}</h2><dl>", f"<dt>spend</dt><dd>{usd(s.spend.get(WALMART_FAMILY, 0.0) * s.window.annualize)} a year</dd>"]
+    if m and s.walmart_feed_span is not None:
+        parts += [f"<dt>capture</dt><dd>{usd(m.total)}, {m.first} → {m.last}</dd>",
+                  f"<dt>feed, same days</dt><dd>{usd(s.walmart_feed_span)}</dd>"]
+    parts.append("</dl><p class=fine>From the card feed, which has every OnePay row."
+                 + (" The order capture is a cross-check: the feed runs a little under it where Walmart charged less than the order total."
+                    if m else "") + "</p></div>")
     return "".join(parts)
 
 
@@ -3659,8 +3629,8 @@ def bind_address(host: str | None = None, tailscale: bool = False) -> tuple[str,
     return host or LOOPBACK, set()
 
 
-def serve(root: Path, export: Path | None = None, host: str | None = None, port: int = 8766, todo_file: Path | None = None, rules: Path | None = None, assumptions: Path | None = None, tailscale: bool = False) -> None:
-    cfg = Config(root, rules or root / "rules.toml", assumptions or root / "assumptions.toml", todo_file, export)
+def serve(root: Path, host: str | None = None, port: int = 8766, todo_file: Path | None = None, rules: Path | None = None, assumptions: Path | None = None, tailscale: bool = False) -> None:
+    cfg = Config(root, rules or root / "rules.toml", assumptions or root / "assumptions.toml", todo_file)
     host, names = bind_address(host, tailscale)
     srv = ThreadingHTTPServer((host, port), make_handler(cfg, names=names))
     print(f"board on http://{host}:{port}/  → records into {cfg.rules.name} / {cfg.assumptions.name}, audit in {root / 'data' / 'board-decisions.jsonl'}", flush=True)

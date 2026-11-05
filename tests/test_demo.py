@@ -78,7 +78,7 @@ def test_cli_without_home_uses_a_new_temp_dir(tmp_path, monkeypatch, capsys):
 
 
 def test_every_board_page_has_content(inst):
-    cfg = board.Config(inst, inst / "rules.toml", inst / "assumptions.toml", None, None)
+    cfg = board.Config(inst, inst / "rules.toml", inst / "assumptions.toml", None)
     srv = ThreadingHTTPServer(("127.0.0.1", 0), board.make_handler(cfg, today=lambda: TODAY))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:

@@ -11,7 +11,7 @@ from datetime import date
 
 import pytest
 from feedfix import install
-from test_board import ASSUMPTIONS, INSTANCE, _synthetic
+from test_board import ASSUMPTIONS, FIX, INSTANCE, _synthetic
 from test_board_pages import _wallet
 
 from penny import __main__ as cli
@@ -54,7 +54,7 @@ def _assumptions(inst):
 def test_board_state_is_what_worth_load_reads(inst):
     rules, assumptions = _rules(inst), _assumptions(inst)
     i = worth.load(inst, rules, assumptions)
-    s = board.load_state(board.Config(inst, inst / "rules.toml", inst / "assumptions.toml", None), TODAY)
+    s = board.load_state(board.Config(inst, inst / "rules.toml", inst / "assumptions.toml"), TODAY)
     assert s.spend == i.spend and s.window == i.window and s.n_txns == len(i.tx)
     assert s.carried == i.carried and s.credit_years == i.credit_years
     assert [w.worth for w in s.worth] == [w.worth for w in i.worth]
@@ -63,7 +63,7 @@ def test_board_state_is_what_worth_load_reads(inst):
 def test_report_and_board_print_the_same_verdicts(inst, capsys):
     cli.main(["--home", str(inst), "report"])
     out = capsys.readouterr().out
-    s = board.load_state(board.Config(inst, inst / "rules.toml", inst / "assumptions.toml", None), TODAY)
+    s = board.load_state(board.Config(inst, inst / "rules.toml", inst / "assumptions.toml"), TODAY)
     for v in s.analysis.verdicts.values():
         assert report.money(v.net["base"]) in out
 
@@ -179,3 +179,30 @@ def test_the_cache_keeps_only_a_few_products(tmp_path):
         p.write_text("[]")
         captures.read(p, len)
     assert len(captures._CACHE) <= captures.KEEP
+
+
+# --------------------------------------------------------------------------
+# A capture measures and cross-checks; it never replaces spend
+
+
+def test_a_walmart_capture_leaves_the_feeds_spend_alone(inst):
+    rules, assumptions = _rules(inst), _assumptions(inst)
+    before = worth.load(inst, rules, assumptions)
+    (inst / "data" / "walmart-orders-2026-12-31.json").write_text(json.dumps(_listing(5000.0)))
+    after = worth.load(inst, rules, assumptions)
+    assert after.spend == before.spend and after.walmart_measured.total == 5100.0
+    # The cross-check: the feed's own Walmart rows over the capture's days, beside it.
+    assert after.walmart_feed_span == pytest.approx(sum(t.amount for t in after.tx if t.family in (
+        worth.WALMART_FAMILY, worth.WALMART_ONLINE, worth.WALMART_STORE)))
+
+
+def test_report_on_an_export_says_walmart_is_a_floor(inst, capsys):
+    cli.main(["--home", str(inst), "report", str(FIX)])
+    assert worth.WALMART_FLOOR in capsys.readouterr().out
+    cli.main(["--home", str(inst), "report"])
+    assert worth.WALMART_FLOOR not in capsys.readouterr().out
+
+
+def test_the_board_has_no_export_mode():
+    with pytest.raises(SystemExit):
+        cli.main(["board", "--export", str(FIX)])

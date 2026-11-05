@@ -89,7 +89,7 @@ def test_board_writes_overrides_into_the_instance_only(tmp_path):
     shutil.copy(INSTANCE / "rules.toml", tmp_path / "rules.toml")
     (tmp_path / "assumptions.toml").write_text("")
     defaults = home.DEFAULT_RULES.read_text()
-    cfg = board.Config(tmp_path, tmp_path / "rules.toml", tmp_path / "assumptions.toml", None, None)
+    cfg = board.Config(tmp_path, tmp_path / "rules.toml", tmp_path / "assumptions.toml", None)
     res = board.record(cfg, [{"file": "rules", "section": "cards.costco_visa", "key": "verified", "value": True},
                              {"file": "rules", "section": "memberships.prime", "key": "fee", "value": 149}])
     assert [(r["key"], r["after"]) for r in res["recorded"]] == [("verified", True), ("fee", 149)]

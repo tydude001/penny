@@ -24,7 +24,7 @@ from penny import board, home
 def server(tmp_path):
     """The board on the feed, as test_board's fixture serves it."""
     install(tmp_path)
-    yield from _serve(tmp_path, None)
+    yield from _serve(tmp_path)
 
 
 def _row(page, key):
@@ -86,7 +86,7 @@ def test_dated_to_dos_are_a_later_list_and_the_rest_fold_away(tmp_path):
     shutil.copy(INSTANCE / "rules.toml", tmp_path / "rules.toml")
     (tmp_path / "assumptions.toml").write_text(ASSUMPTIONS)
     (tmp_path / "wiki.md").write_text(WIKI)
-    cfg = board.Config(tmp_path, tmp_path / "rules.toml", tmp_path / "assumptions.toml", tmp_path / "wiki.md", None)
+    cfg = board.Config(tmp_path, tmp_path / "rules.toml", tmp_path / "assumptions.toml", tmp_path / "wiki.md")
     page = board.render_todo(board.load_state(cfg, TODAY))
     later = re.search(r"<details class=later id='wiki:penny-call'.*?</details>", page, re.DOTALL).group(0)
     assert "Call the bank" in later and "18 days" in later and "Due 2026-10-01" in later

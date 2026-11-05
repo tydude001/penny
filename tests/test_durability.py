@@ -73,7 +73,7 @@ def test_pdftotext_is_given_an_absolute_path_and_a_timeout(monkeypatch, tmp_path
 
 def test_a_stalled_request_body_frees_its_thread(tmp_path, monkeypatch):
     monkeypatch.setattr(board, "REQUEST_TIMEOUT", 0.5)
-    cfg = board.Config(tmp_path, tmp_path / "rules.toml", tmp_path / "assumptions.toml", None, None)
+    cfg = board.Config(tmp_path, tmp_path / "rules.toml", tmp_path / "assumptions.toml", None)
     srv = ThreadingHTTPServer(("127.0.0.1", 0), board.make_handler(cfg))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     port = srv.server_address[1]
@@ -95,7 +95,7 @@ def test_a_stalled_request_body_frees_its_thread(tmp_path, monkeypatch):
 
 
 def test_an_audit_line_goes_through_fsio(tmp_path):
-    cfg = board.Config(tmp_path, tmp_path / "rules.toml", tmp_path / "assumptions.toml", None, None)
+    cfg = board.Config(tmp_path, tmp_path / "rules.toml", tmp_path / "assumptions.toml", None)
     board._audit(cfg, [{"x": 1}])
     p = tmp_path / "data" / "board-decisions.jsonl"
     assert json.loads(p.read_text()) == {"x": 1} and os.stat(p).st_mode & 0o777 == 0o600
