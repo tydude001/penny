@@ -29,6 +29,13 @@ read by anything here, and nothing in this file assumes one exists.
   state derived from the files and posts writes through the same
   allowlisted Record endpoint a CLI command could call; it holds no logic of
   its own.
+- **The worth-it verdicts are worked out in `penny/worth.py`, once.**
+  `worth.load` reads the inputs (feed or export, window, spend, captures)
+  and `worth.analyze` derives the decisions, verdict rows and card side;
+  `penny board` and `penny report` both render that. New verdict logic goes
+  there, never into `board.py`, and arithmetic stays in `model.py` /
+  `cardworth.py`. Store captures are read through `penny/captures.py`,
+  which parses each file once per change.
 - **`penny board` binds loopback by default.** `--tailscale` binds the
   Tailscale IPv4 for reaching it from another device on your own tailnet;
   `--host` still works but warns. Localhost is the only setup this repo
