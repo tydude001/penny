@@ -99,7 +99,7 @@ def test_parkmobile_is_not_mobil_gas():
     fams = cat.build_families(_rules())
     park = _txn("Parkmobile", 12.0, category="TRANSPORTATION_PARKING", mcc="7523")
     cat.categorize([park], fams)
-    assert park.family == cat.OTHER
+    assert park.family == "transit"  # parking, not gas
 
 
 def test_compare_diff_orders_by_the_biggest_gap():
