@@ -2095,7 +2095,8 @@ def swipe_note(v: View) -> str:
     rules = v.s.rules
     bkey = rules["held"]["baseline_card"]
     b = rules["cards"][bkey]
-    head = f"Best held card per family at {cents(float(b.get('default_rate', 0.0)))} a point; ties go to the {b.get('label', bkey)}."
+    head = (f"Best held card per family at {cents(float(b.get('default_rate', 0.0)))} a point; ties go to the {b.get('label', bkey)}. "
+            "Card spend only: payments from a bank account aren't counted.")
     other = next((w for w in v.swipe if w.family == cat.OTHER), None)
     if not other or other.card == bkey:
         return escape(head)

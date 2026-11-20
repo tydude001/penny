@@ -54,16 +54,38 @@ def _held(rules: dict) -> dict:
     return rules
 
 
+def _rescaled(base: dict, over: dict) -> dict:
+    """``over`` with, for each ``valued_in_points`` card whose ``default_rate``
+    it re-values, every default rate it doesn't name scaled by the same
+    factor: an instance valuing Sapphire points at 1.65¢ that names only its
+    3x rates still gets the 5x Lyft at 5 x 1.65¢, not at the defaults' 1¢."""
+    cards = dict(over.get("cards", {}))
+    for ck, c in cards.items():
+        b = base.get("cards", {}).get(ck, {})
+        if not b.get("valued_in_points") or "default_rate" not in c or not float(b.get("default_rate", 0.0)):
+            continue
+        f = float(c["default_rate"]) / float(b["default_rate"])
+        named = c.get("rates", {})
+        rates = {fam: float(r) * f for fam, r in b.get("rates", {}).items() if fam not in named}
+        cards[ck] = {**c, "rates": {**rates, **named}}
+    return {**over, "cards": cards} if cards else over
+
+
+def _over_defaults(over: dict) -> dict:
+    base = defaults()
+    return _held(merge(base, _rescaled(base, over)))
+
+
 def merged_text(text: str) -> dict:
     """The defaults with an instance ``rules.toml``'s text merged over them."""
-    return _held(merge(defaults(), tomllib.loads(text)))
+    return _over_defaults(tomllib.loads(text))
 
 
 def load_rules(path: str | Path) -> dict:
     """An instance ``rules.toml`` merged over the defaults. The instance file
     must exist (``penny init`` writes one)."""
     with open(path, "rb") as f:
-        return _held(merge(defaults(), tomllib.load(f)))
+        return _over_defaults(tomllib.load(f))
 
 
 STARTER_RULES = """\

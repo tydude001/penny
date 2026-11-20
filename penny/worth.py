@@ -822,6 +822,12 @@ class Inputs:
         return model.annualized(self.spend, self.window.annualize)
 
     @property
+    def card_spend(self) -> dict[str, float]:
+        """``spend`` less what was paid from a bank account (rent, utilities,
+        taxes by ACH): card edges and where to swipe are about what goes on a card."""
+        return card_spend(self.tx)
+
+    @property
     def first(self) -> date:
         return self.tx[0].date if self.tx else self.window.start
 
@@ -894,6 +900,12 @@ def load(root: Path, rules: dict, assumptions: dict, export: Path | None = None,
     )
 
 
+def card_spend(tx: list) -> dict[str, float]:
+    """Spend by family on the rows not paid from a bank account. A row with
+    no account type (a Rocket Money export) counts as card spend."""
+    return model.spend_by_family([t for t in tx if t.account_type != "depository"])
+
+
 @dataclass
 class CardSide:
     """The card verdicts: one row per card, where to swipe, and card worth's
@@ -907,15 +919,20 @@ class CardSide:
 
 
 def card_side(rules: dict, assumptions: dict, spend: dict[str, float], annualize: float, worth: list[cardworth.Worth],
-              carried: dict[str, dict[str, float]], today: date | None, verdicts: dict | None = None) -> CardSide:
+              carried: dict[str, dict[str, float]], today: date | None, verdicts: dict | None = None,
+              on_cards: dict[str, float] | None = None) -> CardSide:
+    """``on_cards``, when given, is the card spend alone (``card_spend``):
+    what the card rows' edges and the where-to-swipe sheet read, since rent
+    paid from checking moves to no card. Membership verdicts keep ``spend``."""
+    on_cards = spend if on_cards is None else on_cards
     margin = worth_margin(worth)
     alts = assumptions.get("card_worth", {}).get("alternatives", [])
     flip = flip_point(rules, assumptions, carried.get(alts[0], {})) if margin else None
     # The margin's low end takes benefits at their low too, so it can straddle
     # zero with no ¢/pt in the range flipping it; then say where it would.
     even = flip_point(rules, assumptions, carried.get(alts[0], {}), lo=0.001) if margin and not flip and margin["low"] < 0 <= margin["high"] else None
-    return CardSide(card_rows(rules, assumptions, spend, annualize, worth, today, verdicts=verdicts),
-                    swipe_rows(rules, spend, annualize, today), margin, flip, even)
+    return CardSide(card_rows(rules, assumptions, on_cards, annualize, worth, today, verdicts=verdicts),
+                    swipe_rows(rules, on_cards, annualize, today), margin, flip, even)
 
 
 @dataclass
@@ -933,4 +950,4 @@ def analyze(i: Inputs, wiki: list[WikiRow] | None = None, today: date | None = N
     verdicts = by_key(model.evaluate(r, a, sp, k))
     decisions = rank(derive(r, a, sp, k, i.found, wiki, today, root, i.measures, verdicts=verdicts))
     return Analysis(verdicts, decisions, verdict_rows(r, a, sp, k, verdicts=verdicts),
-                    card_side(r, a, sp, k, i.worth, i.carried, today, verdicts))
+                    card_side(r, a, sp, k, i.worth, i.carried, today, verdicts, i.card_spend))

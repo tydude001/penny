@@ -383,6 +383,13 @@ def resolve_points(rules: dict) -> dict:
     the raw rules through here, so it checks them first (``validate_rules``)."""
     validate_rules(rules)
     cards = dict(rules.get("cards", {}))
+    # A bill on a stored card number (a ``card_on_file`` family) earns a
+    # card's ``card_on_file_rate`` where its default rate needs a tap.
+    on_file = [f for f, spec in rules.get("families", {}).items() if spec.get("card_on_file")]
+    for ckey, card in cards.items():
+        if "card_on_file_rate" in card and on_file:
+            rate = float(card["card_on_file_rate"])
+            cards[ckey] = {**card, "rates": {**{f: rate for f in on_file}, **card.get("rates", {})}}
     for ckey, card in cards.items():
         pool = card.get("points_of")
         if not pool:

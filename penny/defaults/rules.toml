@@ -35,6 +35,7 @@ exclude_categories = ["Income", "Internal Transfers", "Savings Transfer", "Credi
 # Wellness. Needs Prime. Its value is what the covered prescriptions would
 # cost elsewhere minus the $60 a year per person; set it in assumptions.toml.
 label = "RxPass"
+card_on_file = true
 membership = "prime"
 patterns = ['amazon \| amazon$']
 amounts = [5.00]
@@ -43,6 +44,7 @@ amounts = [5.00]
 # $9/mo Prime-member price for One Medical (list is $199/yr). A Prime perk,
 # not Amazon shopping, so it must not earn the Prime Visa's 5%.
 label = "One Medical"
+card_on_file = true
 membership = "prime"
 patterns = ['amazon onemed', '\bone ?medical']
 
@@ -139,6 +141,52 @@ patterns = ['\bkroger', '\baldi(?![a-z])', '\bheb(?![a-z])', '\bh-e-b', '\bpubli
 categories = ["Groceries", "FOOD_AND_DRINK_GROCERIES"]
 mccs = ["5411"]
 
+# The families below exist for the where-to-swipe sheet: each is somewhere a
+# card in the catalogue pays a bonus, so it can't sit in "everything else",
+# where only default rates compete. None has a budget category of its own;
+# their rows keep Plaid's. Category definitions are Chase's Rewards Category
+# FAQ (chase.com/RewardsCategoryFAQs, read 2026-11-20) unless a card says else.
+
+[families.lyft]
+# Its own family, not rideshare: the Sapphire's 5x and the Freedom Flex's 2x
+# name Lyft only (both through 2027-09-30). Uber and Waymo stay in other.
+label = "Lyft"
+patterns = ['\blyft']
+
+[families.transit]
+# Chase's travel category (the Sapphire's 2x) names "toll bridges and
+# highways, and parking lots and garages" beside trains and buses; so does
+# the Prime Visa's "local transit and commuting".
+label = "Transit, tolls and parking"
+patterns = []
+categories = ["TRANSPORTATION_TOLLS", "TRANSPORTATION_PARKING", "TRANSPORTATION_PUBLIC_TRANSIT"]
+
+[families.phone]
+# `card_on_file`: billed to a stored card number, so a card whose default
+# rate needs a tap (Apple Pay) earns its card_on_file_rate here instead.
+label = "Phone plans"
+card_on_file = true
+patterns = ['\bt-mobile', '\bverizon wireless', '\bvisible(?![a-z])', '\bmint mobile', '\bcricket wireless']
+categories = ["RENT_AND_UTILITIES_TELEPHONE"]
+
+[families.streaming]
+# The Sapphire's 3x counts only a named list (Chase's FAQ): these patterns are
+# that list. Apple Music and Apple TV bill through Apple, so the apple family
+# above takes them first.
+label = "Streaming"
+card_on_file = true
+patterns = ['\bnetflix', '\bhulu', '\bdisney ?(\+|plus)', '\bespn ?(\+|plus)', '\bfubo', '\bhbo ?max', '\bmax\.com',
+            '\bpandora', '\bparamount ?(\+|plus)', '\bpeacock', '\bshowtime', '\bsirius ?xm', '\bsling(?![a-z])',
+            '\bspotify', '\byoutube ?(premium|tv|subs)', '\byoutubepremium', '\bvudu']
+
+[families.travel]
+# Flights, rental cars, and hotels by name. Not Plaid's TRAVEL_LODGING: rent
+# has been seen filed there. Chase Travel's 5x isn't separated.
+label = "Travel"
+patterns = ['\bhyatt', '\bmarriott', '\bhilton(?![a-z])', '\bihg(?![a-z])', '\bholiday inn', '\bairbnb', '\bvrbo',
+            '\bexpedia', '\bhotels\.com', '\bbooking\.com']
+categories = ["TRAVEL_FLIGHTS", "TRAVEL_RENTAL_CARS"]
+
 # ---------------------------------------------------------------------------
 # Budget categories: what the money was for, beside the family (what a card
 # earns on). First answer wins: a transfer, card payment or income is not
@@ -233,30 +281,37 @@ annual_fee = 0   # a hypothetical no-fee 2% card, the Preferred's cash alternati
 # 2x other travel; 5x Chase Travel; 5x Lyft through 2027-09-30; 1x all other.
 # Online grocery excludes Walmart, so walmart_delivery stays at 1x. costco_gas
 # at 3x assumes Costco pumps code as a gas station: believed, not checked.
-# No family here separates streaming or travel.
+# lyft, transit, streaming and travel from the same page and Chase's Rewards
+# Category FAQ, 2026-11-20 (travel names tolls and parking; streaming is a
+# named list). The Lyft 5x ends 2027-09-30: drop it from rates then.
 # The ¢/pt is a judgment, not a card term, which is why verified stays false.
 # The board's ¢/pt Record rescales default_rate and every rate below together,
-# keeping each one's multiple of the default.
+# keeping each one's multiple of the default. `valued_in_points`: an instance
+# that sets only default_rate (and some rates) gets every rate it doesn't name
+# rescaled with it, so a rate added here keeps its multiple there too.
 label = "Sapphire Preferred"
 network = "visa"
 verified = false
 # The default is 1¢, the cash-out value; set your own ¢/pt in your instance.
+valued_in_points = true
 default_rate = 0.01
-rates = { restaurants = 0.03, gas = 0.03, costco_gas = 0.03 }
+rates = { restaurants = 0.03, gas = 0.03, costco_gas = 0.03, lyft = 0.05, transit = 0.02, travel = 0.02, streaming = 0.03 }
 annual_fee = 95
 
 [cards.prime_visa]
 # Checked 2026-11-02 against creditcards.chase.com/cash-back-credit-cards/
 # amazon-prime-rewards: 5% at Amazon.com, Whole Foods and Chase Travel; 2% at
 # gas stations, restaurants and local transit; 1% else. Drugstores were 2% on
-# the pre-2023 Prime Rewards Visa and are 1% now. No family separates transit.
+# the pre-2023 Prime Rewards Visa and are 1% now. "Local transit and commuting
+# (including rideshare)" per the product page; Chase's FAQ adds tolls and
+# parking (read 2026-11-20): lyft and transit.
 label = "Prime Visa"
 network = "visa"
 verified = true
 verified_on = "2026-11-02"
 requires_membership = false   # becomes the plain Amazon Visa without Prime
 default_rate = 0.01
-rates = { amazon = 0.05, whole_foods = 0.05, amazon_pharmacy = 0.05, gas = 0.02, restaurants = 0.02 }
+rates = { amazon = 0.05, whole_foods = 0.05, amazon_pharmacy = 0.05, gas = 0.02, restaurants = 0.02, lyft = 0.02, transit = 0.02 }
 without_membership_rates = { amazon = 0.03, whole_foods = 0.03, amazon_pharmacy = 0.03 }
 
 [cards.walmart_card]
@@ -285,7 +340,7 @@ network = "visa"
 verified = false
 requires_membership = true   # the card is closed when the membership lapses
 default_rate = 0.01
-rates = { costco_gas = 0.05, gas = 0.04, restaurants = 0.03, costco = 0.02 }
+rates = { costco_gas = 0.05, gas = 0.04, restaurants = 0.03, costco = 0.02, travel = 0.03 }
 caps = [{ families = ["costco_gas", "gas"], annual = 7000, then = 0.01 }]
 
 # No-fee cards below: each says when its terms were last read.
@@ -307,6 +362,9 @@ default_rate = 0.02
 rates = { apple = 0.03 }
 # The board's where-to-swipe sheet names the default rate by how it is earned.
 default_via = "Apple Pay"
+# A bill charged to the stored card number (a `card_on_file` family) gets
+# the typed-in 1%, not Apple Pay's 2%.
+card_on_file_rate = 0.01
 
 [cards.wf_autograph]
 # Wells Fargo. Earn: 3x points at 1¢ on restaurants, gas stations,
@@ -314,13 +372,16 @@ default_via = "Apple Pay"
 # at 3x assumes Costco pumps code as a gas station, as for the Sapphire.
 # Card terms checked 2026-09-22 (NerdWallet, Upgraded Points): unchanged, $0
 # fee. The Costco-pump coding is still an assumption, not a card term.
+# phone, streaming and travel are those same 3x categories; which streaming
+# services and what "transit" covers weren't read (wellsfargo.com's card page
+# 404'd 2026-11-20), so transit isn't listed and streaming takes Chase's list.
 label = "Wells Fargo Autograph"
 network = "visa"
 verified = true
 verified_on = "2026-09-22"
 requires_membership = false
 default_rate = 0.01
-rates = { restaurants = 0.03, gas = 0.03, costco_gas = 0.03 }
+rates = { restaurants = 0.03, gas = 0.03, costco_gas = 0.03, phone = 0.03, streaming = 0.03, travel = 0.03 }
 
 [cards.citi_custom_cash]
 # Earn: 5% on whichever
@@ -355,8 +416,8 @@ caps = [{ families = ["groceries"], annual = 6000, then = 0.01 }]
 # Sapphire's default_rate, and they move with its ¢/pt Record and the low/high
 # point range. Earn, from creditcards.chase.com/cash-back-credit-cards/freedom/flex
 # read 2026-09-23: 5x rotating (below); 5x Chase Travel; 3x dining including
-# takeout; 3x drugstores; 1x all other; 2x Lyft through 2027-09-30; $0 fee.
-# No family separates Chase Travel or Lyft. World Mastercard, so Costco's
+# takeout; 3x drugstores; 1x all other; 2x Lyft through 2027-09-30 (reread
+# 2026-11-20; drop lyft from points then); $0 fee. No family separates Chase Travel. World Mastercard, so Costco's
 # Visa-only pumps and warehouse never pick it. Dining ties the Sapphire's 3x,
 # so outside a bonus quarter only drugstores gain.
 label = "Chase Freedom Flex"
@@ -364,7 +425,7 @@ network = "mastercard"
 verified = false
 requires_membership = false
 points_of = "sapphire_preferred"
-points = { default = 1, restaurants = 3, drugstores = 3 }
+points = { default = 1, restaurants = 3, drugstores = 3, lyft = 2 }
 
 # Rotating 5x quarters, up to `cap` of combined purchases, once activated.
 # Chase announces one quarter at a time; add each as it is announced and
